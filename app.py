@@ -1,7 +1,9 @@
 import os
 import sys
+import html
 import datetime
 import json
+import logging
 
 from PyQt5.QtWidgets import (
     QMainWindow, QSplitter, QAction, QFileDialog,
@@ -10,6 +12,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QIcon, QKeySequence
 from PyQt5.QtCore import Qt, QRectF, QTimer, QEvent, QSize
+
+
+logger = logging.getLogger(__name__)
 
 from version_manager import VersionManager, BRANCH_COLORS
 from graph_widget import GraphView
@@ -80,6 +85,7 @@ class MainWindow(QMainWindow):
         self.graph_view.new_commit_requested.connect(self._on_commit)
         self.graph_view.new_branch_requested.connect(self._on_new_branch)
         self.graph_view.new_branch_at_requested.connect(self._on_new_branch_at)
+        self.graph_view.switch_branch_requested.connect(self._on_switch_branch)
         self.editor.new_file_requested.connect(self._on_new_file)
         self.editor.open_file_requested.connect(self._on_open_file)
         self.editor.export_requested.connect(self._on_export)
@@ -97,8 +103,9 @@ class MainWindow(QMainWindow):
         self._start_global_hotkey()
         self.window_geometry = self.geometry()
         self.window_state = self.windowState()
-        
+
         self.reminder_widget.start_scheduler()
+        self._setup_auto_save_timer()
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_file)
@@ -217,6 +224,30 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(
             f"已在 {hash_value[:8]} 处创建分支：{dlg.branch_name()}"
         )
+
+    def _on_switch_branch(self, branch_name: str):
+        if not self.vm.repo_ok():
+            return
+
+        if self.editor.is_modified():
+            result = unsaved_changes_dialog(self)
+            if result == "cancel":
+                return
+            elif result == "commit":
+                self._on_commit()
+                if self.editor.is_modified():
+                    return
+
+        ok, err = self.vm.switch_branch(branch_name)
+        if not ok:
+            show_error(self, "切换分支失败", err)
+            return
+
+        html = self.vm.read_html()
+        self.editor.set_html(html)
+        self.editor.set_modified(False)
+        self._refresh_graph()
+        self.status_bar.showMessage(f"已切换到分支：{branch_name}")
 
     def _on_node_clicked(self, hash_value: str):
         if not self.vm.repo_ok():
@@ -407,6 +438,7 @@ class MainWindow(QMainWindow):
             c.branch_color = branch_color_map.get(c.branch_name, "#9E9E9E")
 
         self.graph_view.set_commits(commits, cur)
+        self.graph_view.update_branches(self.vm.branches(), self.vm.current_branch())
 
     def _check_dirty(self) -> bool:
         if not self.vm.repo_ok():
@@ -423,17 +455,45 @@ class MainWindow(QMainWindow):
         return True
 
     def _start_global_hotkey(self):
-        from pynput import keyboard
-        
-        def on_activate():
-            QApplication.instance().postEvent(
-                self, ScreenshotEvent()
-            )
-        
-        self.hotkey = keyboard.GlobalHotKeys({
-            '<ctrl>+<alt>+s': on_activate
-        })
-        self.hotkey.start()
+        try:
+            from pynput import keyboard
+        except Exception as e:
+            logger.warning("pynput 导入失败，全局热键将不可用: %s", e)
+            self.hotkey = None
+            return
+
+        try:
+            def on_activate():
+                QApplication.instance().postEvent(
+                    self, ScreenshotEvent()
+                )
+
+            self.hotkey = keyboard.GlobalHotKeys({
+                '<ctrl>+<alt>+s': on_activate
+            })
+            self.hotkey.start()
+        except Exception as e:
+            logger.warning("全局热键启动失败，截图快捷键将不可用: %s", e)
+            self.hotkey = None
+
+    def _setup_auto_save_timer(self):
+        """启动定时自动保存（每 60 秒），仅写 html 文件，不创建 commit。"""
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setInterval(60 * 1000)
+        self._auto_save_timer.timeout.connect(self._auto_save)
+        self._auto_save_timer.start()
+
+    def _auto_save(self):
+        """自动保存：如果编辑器有修改，则写入 html 文件，但不创建 commit。"""
+        try:
+            if not self.vm.repo_ok():
+                return
+            if not self.editor.is_modified():
+                return
+            self.vm.write_html(self.editor.to_html())
+            self.status_bar.showMessage("已自动保存", 3000)
+        except Exception as e:
+            logger.exception("自动保存失败: %s", e)
 
     def customEvent(self, event):
         if isinstance(event, ScreenshotEvent):
@@ -471,14 +531,16 @@ class MainWindow(QMainWindow):
             shutil.copy2(filepath, dst)
             img_src = os.path.join("imgs", filename).replace("\\", "/")
 
-        html = f'''
+        # 对图片路径进行 HTML 转义，防止路径中包含特殊字符导致 XSS
+        safe_src = html.escape(img_src, quote=True)
+        screenshot_html = f'''
         <div style="display:block; margin: 10px 0;">
-            <img src="{img_src}" width="100%">
+            <img src="{safe_src}" width="100%">
         </div>
         <br>
         '''
         cursor = self.editor.editor.textCursor()
-        cursor.insertHtml(html)
+        cursor.insertHtml(screenshot_html)
 
         self.setGeometry(self.window_geometry)
         self.setWindowState(self.window_state)
@@ -501,8 +563,17 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("设置已保存", 3000)
 
     def closeEvent(self, event):
-        if hasattr(self, 'hotkey'):
-            self.hotkey.stop()
+        # 关闭前自动保存一次（仅写文件，不创建 commit）
+        self._auto_save()
+
+        # 停止全局热键（容错处理）
+        hotkey = getattr(self, 'hotkey', None)
+        if hotkey is not None:
+            try:
+                hotkey.stop()
+            except Exception as e:
+                logger.warning("停止全局热键失败: %s", e)
+
         if not self._check_dirty():
             event.ignore()
         else:

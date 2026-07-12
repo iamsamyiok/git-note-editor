@@ -2,6 +2,7 @@ import os
 import json
 from typing import List
 from chat_model import ChatSession, Message
+from json_store import JsonStore
 from path_helper import get_data_file_path
 
 
@@ -15,27 +16,28 @@ class ChatManager:
         self._load_data()
     
     def _load_data(self):
-        if os.path.exists(self.data_file):
-            try:
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    for session_data in data.get('sessions', []):
-                        session = ChatSession.from_dict(session_data)
-                        self.sessions[session.id] = session
-                    self.current_session_id = data.get('current_session_id', '')
-            except Exception as e:
-                print(f"加载聊天数据失败: {e}")
-                self.sessions = {}
-                self.current_session_id = ""
-    
+        try:
+            store = JsonStore(self.data_file)
+            data = store.read(default={})
+            if not isinstance(data, dict):
+                data = {}
+            for session_data in data.get('sessions', []):
+                session = ChatSession.from_dict(session_data)
+                self.sessions[session.id] = session
+            self.current_session_id = data.get('current_session_id', '')
+        except Exception as e:
+            print(f"加载聊天数据失败: {e}")
+            self.sessions = {}
+            self.current_session_id = ""
+
     def _save_data(self):
         data = {
             'sessions': [session.to_dict() for session in self.sessions.values()],
             'current_session_id': self.current_session_id,
         }
         try:
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            store = JsonStore(self.data_file)
+            store.write(data)
         except Exception as e:
             print(f"保存聊天数据失败: {e}")
     

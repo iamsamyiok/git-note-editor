@@ -3,7 +3,7 @@ from typing import Dict
 from PyQt5.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsItem,
     QMenu, QAction, QWidget, QVBoxLayout, QPushButton,
-    QHBoxLayout,
+    QHBoxLayout, QComboBox,
 )
 from PyQt5.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QPainterPath,
@@ -138,6 +138,7 @@ class GraphView(QWidget):
     new_commit_requested = pyqtSignal()
     new_branch_requested = pyqtSignal()
     new_branch_at_requested = pyqtSignal(str)
+    switch_branch_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,6 +158,12 @@ class GraphView(QWidget):
         branch_btn.setFixedHeight(28)
         branch_btn.clicked.connect(self.new_branch_requested.emit)
         btn_layout.addWidget(branch_btn)
+
+        self._branch_combo = QComboBox()
+        self._branch_combo.setFixedHeight(28)
+        self._branch_combo.setMinimumWidth(100)
+        self._branch_combo.currentIndexChanged.connect(self._on_branch_switch)
+        btn_layout.addWidget(self._branch_combo)
 
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
@@ -254,6 +261,23 @@ class GraphView(QWidget):
         self._scene.setSceneRect(scene_rect)
 
         QTimer.singleShot(50, self._auto_center_current)
+
+    def update_branches(self, branch_names, current_branch):
+        """更新分支下拉列表。"""
+        self._branch_combo.blockSignals(True)
+        self._branch_combo.clear()
+        for name in branch_names:
+            self._branch_combo.addItem(name)
+        idx = self._branch_combo.findText(current_branch)
+        if idx >= 0:
+            self._branch_combo.setCurrentIndex(idx)
+        self._branch_combo.blockSignals(False)
+
+    def _on_branch_switch(self, index):
+        if index >= 0:
+            name = self._branch_combo.itemText(index)
+            if name:
+                self.switch_branch_requested.emit(name)
 
     def _auto_center_current(self):
         if self._current_hash and self._current_hash in self._nodes:

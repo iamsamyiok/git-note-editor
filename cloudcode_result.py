@@ -151,8 +151,9 @@ class CloudCodeResultDialog(QDialog):
     
     def _copy_result(self):
         text = self.output_text.toPlainText()
-        
-        if text and text != "（无输出）":
+
+        # 用任务实际输出判断是否有可复制内容，避免依赖展示文案的字符串比较
+        if bool(self.task.stdout) or bool(self.task.stderr):
             clipboard = QApplication.clipboard()
             clipboard.setText(text)
             QMessageBox.information(self, "成功", "结果已复制到剪贴板")

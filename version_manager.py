@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 
 from models import CommitNode
+from json_store import JsonStore
 
 BRANCH_COLORS = [
     "#2196F3", "#FF5722", "#4CAF50", "#FF9800",
@@ -22,6 +23,8 @@ class VersionManager:
         self.versions_dir = ""
         self.meta_file = ""
         self.current_commit = ""
+        self._meta_cache = None
+        self._meta_mtime = 0
 
     def _meta_path(self) -> str:
         return os.path.join(self.note_dir, "meta.json")
@@ -30,15 +33,40 @@ class VersionManager:
         return os.path.join(self.versions_dir, f"{commit_id}.html")
 
     def _load_meta(self) -> dict:
-        if os.path.exists(self.meta_file):
-            with open(self.meta_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {"commits": [], "branches": {"main": ""}, "current_branch": "main"}
+        # 检查文件 mtime，未变化则返回缓存
+        try:
+            mtime = os.path.getmtime(self.meta_file) if os.path.exists(self.meta_file) else 0
+        except OSError:
+            mtime = 0
+
+        if self._meta_cache is not None and mtime == self._meta_mtime:
+            return self._meta_cache
+
+        store = JsonStore(self.meta_file)
+        raw = store.read(default=None)
+        if not isinstance(raw, dict):
+            raw = {}
+
+        # 用 .get() 容错，确保缺字段不崩溃
+        meta = {
+            "commits": raw.get("commits", []),
+            "branches": raw.get("branches", {}),
+            "current_branch": raw.get("current_branch", "main"),
+        }
+
+        self._meta_cache = meta
+        self._meta_mtime = mtime
+        return meta
 
     def _save_meta(self, data: dict):
-        os.makedirs(self.note_dir, exist_ok=True)
-        with open(self.meta_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        store = JsonStore(self.meta_file)
+        store.write(data)
+        # 更新缓存
+        self._meta_cache = data
+        try:
+            self._meta_mtime = os.path.getmtime(self.meta_file)
+        except OSError:
+            self._meta_mtime = 0
 
     def _new_id(self) -> str:
         return str(uuid.uuid4())[:8]
@@ -211,24 +239,18 @@ class VersionManager:
             return False, "根节点不可删除。"
 
         parent_id = commit.get("parent_id", "")
-        child_id = None
+        # 找到所有子节点，逐一将 parent_id 改为被删除节点的 parent_id
+        child_ids = [c["id"] for c in meta["commits"] if c.get("parent_id") == commit_hash]
         for c in meta["commits"]:
             if c.get("parent_id") == commit_hash:
-                child_id = c["id"]
-                break
-
-        if child_id:
-            for c in meta["commits"]:
-                if c["id"] == child_id:
-                    c["parent_id"] = parent_id
-                    break
+                c["parent_id"] = parent_id
 
         meta["commits"] = [c for c in meta["commits"] if c["id"] != commit_hash]
 
         branch = meta.get("current_branch", "main")
         if meta["branches"].get(branch) == commit_hash:
-            if child_id:
-                meta["branches"][branch] = child_id
+            if child_ids:
+                meta["branches"][branch] = child_ids[0]
             elif parent_id:
                 meta["branches"][branch] = parent_id
 
@@ -238,8 +260,8 @@ class VersionManager:
 
         self._save_meta(meta)
 
-        if child_id:
-            self.current_commit = child_id
+        if child_ids:
+            self.current_commit = child_ids[0]
         elif parent_id:
             self.current_commit = parent_id
 
@@ -321,11 +343,13 @@ class VersionManager:
 
     # ---------- internal ----------
 
+    def _build_commit_index(self, meta: dict) -> dict:
+        """构建 id → commit_dict 索引。"""
+        return {c.get("id"): c for c in meta.get("commits", []) if c.get("id")}
+
     def _find_commit(self, meta: dict, commit_id: str) -> Optional[dict]:
-        for c in meta.get("commits", []):
-            if c["id"] == commit_id:
-                return c
-        return None
+        index = self._build_commit_index(meta)
+        return index.get(commit_id)
 
     def _assign_lanes(self, nodes: Dict[str, CommitNode], meta: dict):
         branches = meta.get("branches", {})

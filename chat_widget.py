@@ -1,4 +1,5 @@
 import os
+import logging
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QScrollArea, QMessageBox, QFrame,
@@ -10,40 +11,47 @@ from PyQt5.QtGui import QFont, QCursor
 from chat_manager import ChatManager
 from chat_model import Message
 from chat_message_widget import ChatMessageWidget
-from ai_service import AIService
+from ai_service import AIService, AIReplyThread
 from cloudcode_dialog import CloudCodeTaskDialog
 from cloudcode_result import CloudCodeResultDialog
 from cloudcode_executor import CloudCodeExecutor, TaskStatus
 
 
+logger = logging.getLogger(__name__)
+
+
 class ChatWidget(QWidget):
     export_requested = pyqtSignal(str)
     status_update = pyqtSignal(str)
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.chat_manager = ChatManager()
         self.ai_service = AIService()
         self.cloudcode_executor = CloudCodeExecutor()
         self.is_brush_mode = False
-        
+        # 跟踪已渲染消息的 id，便于增量更新
+        self._rendered_message_ids = set()
+        # 跟踪进行中的 AI 回复线程，避免被垃圾回收
+        self._ai_reply_threads = []
+
         self._init_ui()
         self._load_session()
-    
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
+
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(10, 10, 10, 8)
         top_bar.setSpacing(10)
-        
+
         self.session_combo = QComboBox()
         self.session_combo.currentIndexChanged.connect(self._on_session_changed)
         self.session_combo.setFixedWidth(200)
         top_bar.addWidget(self.session_combo)
-        
+
         new_session_btn = QPushButton("＋ 新对话")
         new_session_btn.setFixedHeight(30)
         new_session_btn.clicked.connect(self._create_new_session)
@@ -61,7 +69,7 @@ class ChatWidget(QWidget):
             }
         """)
         top_bar.addWidget(new_session_btn)
-        
+
         delete_session_btn = QPushButton("删除对话")
         delete_session_btn.setFixedHeight(30)
         delete_session_btn.clicked.connect(self._delete_session)
@@ -79,7 +87,7 @@ class ChatWidget(QWidget):
             }
         """)
         top_bar.addWidget(delete_session_btn)
-        
+
         cloudcode_btn = QPushButton("🤖 Cloud Code")
         cloudcode_btn.setFixedHeight(30)
         cloudcode_btn.clicked.connect(self._open_cloudcode_task)
@@ -97,9 +105,9 @@ class ChatWidget(QWidget):
             }
         """)
         top_bar.addWidget(cloudcode_btn)
-        
+
         top_bar.addStretch()
-        
+
         self.brush_btn = QPushButton("🖌️ 笔刷模式")
         self.brush_btn.setFixedHeight(30)
         self.brush_btn.setCheckable(True)
@@ -121,11 +129,11 @@ class ChatWidget(QWidget):
             }
         """)
         top_bar.addWidget(self.brush_btn)
-        
+
         self.selection_count_label = QLabel("已选: 0 条")
         self.selection_count_label.setStyleSheet("color: #999; font-size: 12px;")
         top_bar.addWidget(self.selection_count_label)
-        
+
         export_btn = QPushButton("📤 导出选中")
         export_btn.setFixedHeight(30)
         export_btn.clicked.connect(self._export_selected)
@@ -143,22 +151,22 @@ class ChatWidget(QWidget):
             }
         """)
         top_bar.addWidget(export_btn)
-        
+
         layout.addLayout(top_bar)
-        
+
         message_scroll = QScrollArea()
         message_scroll.setWidgetResizable(True)
         message_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
+
         self.message_container = QWidget()
         self.message_layout = QVBoxLayout(self.message_container)
         self.message_layout.setContentsMargins(10, 10, 10, 10)
         self.message_layout.setSpacing(12)
         self.message_layout.addStretch()
-        
+
         message_scroll.setWidget(self.message_container)
         layout.addWidget(message_scroll)
-        
+
         input_container = QFrame()
         input_container.setStyleSheet("""
             QFrame {
@@ -169,7 +177,7 @@ class ChatWidget(QWidget):
         input_layout = QVBoxLayout(input_container)
         input_layout.setContentsMargins(10, 10, 10, 10)
         input_layout.setSpacing(8)
-        
+
         self.message_input = QLineEdit()
         self.message_input.setPlaceholderText("输入消息...（按 Enter 发送）")
         self.message_input.setFixedHeight(40)
@@ -186,10 +194,10 @@ class ChatWidget(QWidget):
         """)
         self.message_input.returnPressed.connect(self._send_message)
         input_layout.addWidget(self.message_input)
-        
+
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
-        
+
         send_btn = QPushButton("发送")
         send_btn.setFixedHeight(32)
         send_btn.clicked.connect(self._send_message)
@@ -207,7 +215,7 @@ class ChatWidget(QWidget):
             }
         """)
         button_row.addWidget(send_btn)
-        
+
         ai_reply_btn = QPushButton("🤖 AI 回复")
         ai_reply_btn.setFixedHeight(32)
         ai_reply_btn.clicked.connect(self._trigger_ai_reply)
@@ -225,95 +233,142 @@ class ChatWidget(QWidget):
             }
         """)
         button_row.addWidget(ai_reply_btn)
-        
+
         button_row.addStretch()
-        
+
         hint_label = QLabel("提示：未选中消息时 AI 基于最近对话回复，选中消息时基于选中内容")
         hint_label.setStyleSheet("color: #999; font-size: 10px;")
         button_row.addWidget(hint_label)
-        
+
         input_layout.addLayout(button_row)
-        
+
         layout.addWidget(input_container)
-    
+
     def _load_session(self):
         sessions = self.chat_manager.get_all_sessions()
         self.session_combo.clear()
-        
+
         if not sessions:
             self.chat_manager.create_session()
             sessions = self.chat_manager.get_all_sessions()
-        
+
         for session in sessions:
             self.session_combo.addItem(session.name, session.id)
-        
+
         current = self.chat_manager.get_current_session()
         if current:
             idx = self.session_combo.findData(current.id)
             if idx >= 0:
                 self.session_combo.setCurrentIndex(idx)
-        
-        self._refresh_messages()
-    
+
+        self._rebuild_messages()
+
     def _on_session_changed(self, index):
         session_id = self.session_combo.itemData(index)
         if session_id:
             self.chat_manager.set_current_session(session_id)
-            self._refresh_messages()
-    
+            self._rebuild_messages()
+
     def _create_new_session(self):
         name, ok = QInputDialog.getText(self, "新建对话", "对话名称:")
         if ok and name.strip():
             self.chat_manager.create_session(name.strip())
             self._load_session()
-    
+
     def _delete_session(self):
         current = self.chat_manager.get_current_session()
         if not current:
             return
-        
+
         reply = QMessageBox.question(
             self, "确认删除",
             f"确定要删除「{current.name}」吗？",
             QMessageBox.Yes | QMessageBox.No
         )
-        
+
         if reply == QMessageBox.Yes:
             self.chat_manager.delete_session(current.id)
             self._load_session()
-    
-    def _refresh_messages(self):
+
+    def _clear_messages(self):
+        """清空所有已渲染的消息 widget。"""
         for i in reversed(range(self.message_layout.count())):
             widget = self.message_layout.itemAt(i).widget()
             if widget:
                 widget.deleteLater()
-        
+        self._rendered_message_ids.clear()
+
+    def _rebuild_messages(self):
+        """全量重建消息列表（用于切换会话等场景）。"""
+        self._clear_messages()
+
         current = self.chat_manager.get_current_session()
         if not current:
             return
-        
+
         for msg in current.messages:
-            msg_widget = ChatMessageWidget(msg)
-            msg_widget.selection_toggled.connect(self._on_message_toggled)
-            self.message_layout.insertWidget(self.message_layout.count() - 1, msg_widget)
-        
+            self._append_message(msg, scroll=False)
+
         self._scroll_to_bottom()
-    
+
+    def _refresh_messages(self):
+        """增量刷新：只追加尚未渲染的新消息，不重建整个列表。"""
+        current = self.chat_manager.get_current_session()
+        if not current:
+            return
+
+        for msg in current.messages:
+            if msg.id not in self._rendered_message_ids:
+                self._append_message(msg, scroll=False)
+
+        self._scroll_to_bottom()
+
+    def _append_message(self, msg, scroll=True):
+        """只追加一条新消息到列表底部。"""
+        if msg.id in self._rendered_message_ids:
+            return
+        msg_widget = ChatMessageWidget(msg)
+        msg_widget.selection_toggled.connect(self._on_message_toggled)
+        self.message_layout.insertWidget(self.message_layout.count() - 1, msg_widget)
+        self._rendered_message_ids.add(msg.id)
+        if scroll:
+            self._scroll_to_bottom()
+
+    def _remove_message_widget(self, message_id):
+        """根据 message_id 移除已渲染的 widget。"""
+        for i in range(self.message_layout.count()):
+            item = self.message_layout.itemAt(i)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is None:
+                continue
+            if hasattr(widget, 'message') and getattr(widget.message, 'id', None) == message_id:
+                self.message_layout.takeAt(i)
+                widget.deleteLater()
+                self._rendered_message_ids.discard(message_id)
+                return True
+        return False
+
     def _on_message_toggled(self, message_id: str, selected: bool):
+        # 由 chat_manager 统一切换状态并落盘，避免本地与持久层不同步
+        current = self.chat_manager.get_current_session()
+        if current:
+            self.chat_manager.toggle_message_selection(current.id, message_id)
         self.update_selection_count()
-    
+
     def update_selection_count(self):
         current = self.chat_manager.get_current_session()
         if not current:
             count = 0
         else:
             count = sum(1 for msg in current.messages if msg.is_selected)
-        
+
         self.selection_count_label.setText(f"已选: {count} 条")
-    
+
     def _toggle_brush_mode(self):
         self.is_brush_mode = self.brush_btn.isChecked()
-        
+
         if self.is_brush_mode:
             self.setCursor(Qt.CrossCursor)
             self.message_input.setReadOnly(True)
@@ -322,111 +377,128 @@ class ChatWidget(QWidget):
             self.setCursor(Qt.ArrowCursor)
             self.message_input.setReadOnly(False)
             self.message_input.setPlaceholderText("输入消息...（按 Enter 发送）")
-    
+
     def _send_message(self):
         text = self.message_input.text().strip()
         if not text:
             return
-        
+
         current = self.chat_manager.get_current_session()
         if not current:
             QMessageBox.warning(self, "错误", "没有活动对话")
             return
-        
+
         message = Message(
             session_id=current.id,
             sender="用户",
             content=text,
             message_type="text"
         )
-        
+
         self.chat_manager.add_message(current.id, message)
-        self._refresh_messages()
+        self._append_message(message)
         self.message_input.clear()
-    
+
     def _trigger_ai_reply(self):
         current = self.chat_manager.get_current_session()
         if not current:
             QMessageBox.warning(self, "错误", "没有活动对话")
             return
-        
+
         selected_messages = [msg for msg in current.messages if msg.is_selected]
-        
+
         if not selected_messages:
-            context_messages = current.messages
+            # 快照一份上下文，避免线程运行期间列表被修改
+            context_messages = list(current.messages)
         else:
-            context_messages = selected_messages
-        
+            context_messages = list(selected_messages)
+
         loading_msg = Message(
             session_id=current.id,
             sender="AI",
             content="🤔 正在思考...",
             message_type="system"
         )
-        
+
         self.chat_manager.add_message(current.id, loading_msg)
-        self._refresh_messages()
-        
-        success, result = self.ai_service.generate_reply(context_messages)
-        
-        if not self.chat_manager.delete_message(current.id, loading_msg.id):
-            self._refresh_messages()
-        
-        if success:
-            ai_message = Message(
-                session_id=current.id,
-                sender="AI",
-                content=result,
-                message_type="text"
-            )
-            
-            self.chat_manager.add_message(current.id, ai_message)
-            self._refresh_messages()
-        else:
-            QMessageBox.warning(self, "AI 回复失败", result)
-    
+        self._append_message(loading_msg)
+
+        # 创建并启动 AI 回复线程，避免阻塞 UI
+        reply_thread = AIReplyThread(self.ai_service, context_messages)
+
+        def _on_reply_ready(success, result,
+                            _session_id=current.id,
+                            _loading_id=loading_msg.id,
+                            _thread=reply_thread):
+            try:
+                # 删除 loading 消息
+                if self.chat_manager.delete_message(_session_id, _loading_id):
+                    self._remove_message_widget(_loading_id)
+
+                if success:
+                    ai_message = Message(
+                        session_id=_session_id,
+                        sender="AI",
+                        content=result,
+                        message_type="text"
+                    )
+                    self.chat_manager.add_message(_session_id, ai_message)
+                    self._append_message(ai_message)
+                else:
+                    QMessageBox.warning(self, "AI 回复失败", result)
+            finally:
+                try:
+                    self._ai_reply_threads.remove(_thread)
+                except ValueError:
+                    pass
+                _thread.deleteLater()
+
+        reply_thread.reply_ready.connect(_on_reply_ready)
+        self._ai_reply_threads.append(reply_thread)
+        reply_thread.start()
+
     def _export_selected(self):
         current = self.chat_manager.get_current_session()
         if not current:
             QMessageBox.warning(self, "错误", "没有活动对话")
             return
-        
+
         selected_messages = [msg for msg in current.messages if msg.is_selected]
-        
+
         if not selected_messages:
             QMessageBox.warning(self, "提示", "请先选择要导出的消息")
             return
-        
+
         exported_content = ""
         for msg in selected_messages:
             header = f"**{msg.sender}** ({msg.timestamp})\n"
             exported_content += header + msg.content + "\n\n"
-        
+
         self.export_requested.emit(exported_content)
         QMessageBox.information(self, "成功", f"已导出 {len(selected_messages)} 条消息到笔记")
-    
+
     def _open_cloudcode_task(self):
         import uuid
         from cloudcode_dialog import CloudCodeTaskDialog
-        
+
         dialog = CloudCodeTaskDialog(parent=self)
         if dialog.exec_() == CloudCodeTaskDialog.Accepted:
             task_data = dialog.get_task_data()
             task_id = f"task_{uuid.uuid4().hex[:8]}"
-            
+
             self.status_update.emit(f"🚀 Cloud Code 任务启动 - {task_data['description'][:30]}...")
-            
+
             success = self.cloudcode_executor.execute_task(
                 task_id,
                 task_data['description'],
                 task_data['project_path'],
                 self._on_task_completed
             )
-            
+
             if not success:
                 self.status_update.emit("❌ Cloud Code 任务启动失败")
                 QMessageBox.warning(self, "错误", "任务执行失败")
-    
+
     def _on_task_completed(self, task_id: str, task):
         if task.status == TaskStatus.COMPLETED:
             self.status_update.emit(f"✅ Cloud Code 任务完成 - {task.description[:30]}")
@@ -438,7 +510,7 @@ class ChatWidget(QWidget):
                 self, "任务失败",
                 f"Cloud Code 任务执行失败\n\n错误：\n{task.stderr}"
             )
-    
+
     def _scroll_to_bottom(self):
         scroll = self.message_container.parent().verticalScrollBar()
         if scroll:

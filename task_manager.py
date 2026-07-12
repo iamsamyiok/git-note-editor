@@ -3,6 +3,7 @@ import json
 import datetime
 from typing import List, Optional
 from reminder_model import ReminderTask, TriggerType
+from json_store import JsonStore
 
 
 class TaskManager:
@@ -27,13 +28,15 @@ class TaskManager:
 
     def load_tasks(self) -> bool:
         try:
-            if os.path.exists(self.tasks_file):
-                with open(self.tasks_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.tasks = [ReminderTask.from_dict(t) for t in data.get("tasks", [])]
-            else:
+            if not os.path.exists(self.tasks_file):
                 self.tasks = []
                 self.save_tasks()
+                return True
+            store = JsonStore(self.tasks_file)
+            data = store.read(default={})
+            if not isinstance(data, dict):
+                data = {}
+            self.tasks = [ReminderTask.from_dict(t) for t in data.get("tasks", [])]
             return True
         except Exception as e:
             print(f"加载任务失败: {e}")
@@ -43,14 +46,14 @@ class TaskManager:
     def save_tasks(self) -> bool:
         try:
             if not os.path.exists(self.data_dir):
-                os.makedirs(self.data_dir)
+                os.makedirs(self.data_dir, exist_ok=True)
 
             data = {
                 "tasks": [task.to_dict() for task in self.tasks]
             }
 
-            with open(self.tasks_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            store = JsonStore(self.tasks_file)
+            store.write(data)
             return True
         except Exception as e:
             print(f"保存任务失败: {e}")

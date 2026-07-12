@@ -84,9 +84,12 @@ class ChatMessageWidget(QFrame):
         super().enterEvent(event)
 
     def toggle_selection(self):
-        self.message.is_selected = not self.message.is_selected
+        # 不在本地切换状态；计算期望的新状态后由上层 ChatWidget 通过
+        # chat_manager.toggle_message_selection 统一切换并落盘。
+        # 信号是同步处理的，emit 返回后 message.is_selected 已被上层切换。
+        new_state = not self.message.is_selected
+        self.selection_toggled.emit(self.message.id, new_state)
         self.update_selection_style()
-        self.selection_toggled.emit(self.message.id, self.message.is_selected)
 
     def update_selection_style(self):
         if self.message.is_selected:
