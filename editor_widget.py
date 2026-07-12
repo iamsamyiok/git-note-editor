@@ -12,6 +12,10 @@ from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QEvent
 from PyQt5.QtPrintSupport import QPrinter
 from PyQt5.QtWidgets import QApplication
 
+from cloudcode_dialog import CloudCodeTaskDialog
+from cloudcode_result import CloudCodeResultDialog
+from cloudcode_executor import CloudCodeExecutor, TaskStatus
+
 
 class FormatPainterTextEdit(QTextEdit):
     def __init__(self, parent=None):
@@ -35,11 +39,13 @@ class EditorWidget(QWidget):
     open_file_requested = pyqtSignal()
     export_requested = pyqtSignal(str)
     settings_requested = pyqtSignal()
+    status_update = pyqtSignal(str)
 
     def __init__(self, imgs_dir=""):
         super().__init__()
         self.imgs_dir = imgs_dir
-
+        self.cloudcode_executor = CloudCodeExecutor()
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -61,7 +67,24 @@ class EditorWidget(QWidget):
         export_btn.setFixedHeight(28)
         export_btn.clicked.connect(self._on_export)
         top_bar.addWidget(export_btn)
-
+        
+        cloudcode_btn = QPushButton("🤖 Cloud Code")
+        cloudcode_btn.setFixedHeight(28)
+        cloudcode_btn.clicked.connect(self._open_cloudcode_task)
+        cloudcode_btn.setStyleSheet("""
+            QPushButton {
+                background: #6610f2;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background: #520dc2;
+            }
+        """)
+        top_bar.addWidget(cloudcode_btn)
+        
         top_bar.addStretch()
 
         self.toolbar = QToolBar()
@@ -466,7 +489,41 @@ class EditorWidget(QWidget):
             return current_dir_path
         
         return None
-
+    
+    def _open_cloudcode_task(self):
+        import uuid
+        from cloudcode_dialog import CloudCodeTaskDialog
+        
+        dialog = CloudCodeTaskDialog(parent=self)
+        if dialog.exec_() == CloudCodeTaskDialog.Accepted:
+            task_data = dialog.get_task_data()
+            task_id = f"task_{uuid.uuid4().hex[:8]}"
+            
+            self.status_update.emit(f"🚀 Cloud Code 任务启动 - {task_data['description'][:30]}...")
+            
+            success = self.cloudcode_executor.execute_task(
+                task_id,
+                task_data['description'],
+                task_data['project_path'],
+                self._on_task_completed
+            )
+            
+            if not success:
+                self.status_update.emit("❌ Cloud Code 任务启动失败")
+                QMessageBox.warning(self, "错误", "任务执行失败")
+    
+    def _on_task_completed(self, task_id: str, task):
+        if task.status == TaskStatus.COMPLETED:
+            self.status_update.emit(f"✅ Cloud Code 任务完成 - {task.description[:30]}")
+            result_dialog = CloudCodeResultDialog(task, self)
+            result_dialog.exec_()
+        elif task.status == TaskStatus.FAILED:
+            self.status_update.emit(f"❌ Cloud Code 任务失败 - {task.description[:30]}")
+            QMessageBox.warning(
+                self, "任务失败",
+                f"Cloud Code 任务执行失败\n\n错误：\n{task.stderr}"
+            )
+    
     def set_html(self, html: str):
         self.editor.blockSignals(True)
         self.editor.setHtml(html)

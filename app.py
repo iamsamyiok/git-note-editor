@@ -22,6 +22,8 @@ from screenshot_widget import ScreenshotWidget
 from settings_dialog import SettingsDialog
 from bookmark_widget import BookmarkWidget
 from chat_widget import ChatWidget
+from cloudcode_executor import CloudCodeExecutor, TaskStatus
+from cloudcode_dialog import CloudCodeTaskDialog
 
 
 class MainWindow(QMainWindow):
@@ -78,6 +80,10 @@ class MainWindow(QMainWindow):
         self.editor.export_requested.connect(self._on_export)
         self.editor.content_changed.connect(self._on_editor_changed)
         self.editor.settings_requested.connect(self._on_open_settings)
+        self.editor.status_update.connect(self._update_status)
+
+
+        self.chat_widget.status_update.connect(self._update_status)
 
         self.screenshot_widget = ScreenshotWidget()
         self.screenshot_widget.screenshot_taken.connect(self._on_screenshot_taken)
@@ -93,7 +99,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+M"), self, self._on_commit)
         QShortcut(QKeySequence("Ctrl+B"), self, self._on_new_branch)
         QShortcut(QKeySequence("Ctrl+P"), self, lambda: self._on_export("pdf"))
-        self.tab_widget.setCurrentIndex(1)
+        QShortcut(QKeySequence("Ctrl+Shift+C"), self._switch_to_chat)
 
     def _on_new_file(self):
         if not self._check_dirty():
@@ -427,10 +433,9 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
-        
-        self.status_bar.showMessage(
-            f"截图已插入：{os.path.basename(filepath)}", 3000
-        )
+
+    def _update_status(self, message: str):
+        self.status_bar.showMessage(message, 10000)
 
     def _on_open_settings(self):
         dialog = SettingsDialog(self)

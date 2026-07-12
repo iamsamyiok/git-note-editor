@@ -11,15 +11,20 @@ from chat_manager import ChatManager
 from chat_model import Message
 from chat_message_widget import ChatMessageWidget
 from ai_service import AIService
+from cloudcode_dialog import CloudCodeTaskDialog
+from cloudcode_result import CloudCodeResultDialog
+from cloudcode_executor import CloudCodeExecutor, TaskStatus, TaskStatus
 
 
 class ChatWidget(QWidget):
     export_requested = pyqtSignal(str)
+    status_update = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.chat_manager = ChatManager()
         self.ai_service = AIService()
+        self.cloudcode_executor = CloudCodeExecutor()
         self.is_brush_mode = False
         
         self._init_ui()
@@ -74,6 +79,24 @@ class ChatWidget(QWidget):
             }
         """)
         top_bar.addWidget(delete_session_btn)
+        
+        cloudcode_btn = QPushButton("🤖 Cloud Code")
+        cloudcode_btn.setFixedHeight(30)
+        cloudcode_btn.clicked.connect(self._open_cloudcode_task)
+        cloudcode_btn.setStyleSheet("""
+            QPushButton {
+                background: #6610f2;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #520dc2;
+            }
+        """)
+        top_bar.addWidget(cloudcode_btn)
         
         top_bar.addStretch()
         
@@ -381,6 +404,40 @@ class ChatWidget(QWidget):
         
         self.export_requested.emit(exported_content)
         QMessageBox.information(self, "成功", f"已导出 {len(selected_messages)} 条消息到笔记")
+    
+    def _open_cloudcode_task(self):
+        import uuid
+        from cloudcode_dialog import CloudCodeTaskDialog
+        
+        dialog = CloudCodeTaskDialog(parent=self)
+        if dialog.exec_() == CloudCodeTaskDialog.Accepted:
+            task_data = dialog.get_task_data()
+            task_id = f"task_{uuid.uuid4().hex[:8]}"
+            
+            self.status_update.emit(f"🚀 Cloud Code 任务启动 - {task_data['description'][:30]}...")
+            
+            success = self.cloudcode_executor.execute_task(
+                task_id,
+                task_data['description'],
+                task_data['project_path'],
+                self._on_task_completed
+            )
+            
+            if not success:
+                self.status_update.emit("❌ Cloud Code 任务启动失败")
+                QMessageBox.warning(self, "错误", "任务执行失败")
+    
+    def _on_task_completed(self, task_id: str, task):
+        if task.status == TaskStatus.COMPLETED:
+            self.status_update.emit(f"✅ Cloud Code 任务完成 - {task.description[:30]}")
+            result_dialog = CloudCodeResultDialog(task, self)
+            result_dialog.exec_()
+        elif task.status == TaskStatus.FAILED:
+            self.status_update.emit(f"❌ Cloud Code 任务失败 - {task.description[:30]}")
+            QMessageBox.warning(
+                self, "任务失败",
+                f"Cloud Code 任务执行失败\n\n错误：\n{task.stderr}"
+            )
     
     def _scroll_to_bottom(self):
         scroll = self.message_container.parent().verticalScrollBar()
