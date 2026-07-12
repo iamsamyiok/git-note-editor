@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from chat_model import Message
+from path_helper import get_data_file_path
 
 
 class AIService:
@@ -10,9 +11,9 @@ class AIService:
         self.base_url = ""
         self.model_name = ""
         self._load_config()
-    
+
     def _load_config(self):
-        config_path = "config.json"
+        config_path = get_data_file_path("config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:

@@ -2,10 +2,11 @@ import json
 import os
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QGroupBox, QPushButton, QMessageBox, QProgressBar
+    QGroupBox, QPushButton, QMessageBox, QProgressBar, QApplication
 )
 from PyQt5.QtCore import Qt
 import requests
+from path_helper import get_data_file_path
 
 
 class SettingsDialog(QDialog):
@@ -20,8 +21,8 @@ class SettingsDialog(QDialog):
         self.api_key = ""
         self.base_url = ""
         self.model_name = ""
-        
-        config_path = "config.json"
+
+        config_path = get_data_file_path("config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -101,7 +102,7 @@ class SettingsDialog(QDialog):
         
         self.test_btn.setText("测试中...")
         self.test_btn.setEnabled(False)
-        self.processEvents()
+        QApplication.processEvents()
         
         try:
             url = f"{base_url.rstrip('/')}/models"

@@ -2,6 +2,7 @@ import os
 import base64
 import json
 import requests
+from path_helper import get_data_file_path
 
 
 class OCRManager:
@@ -10,9 +11,9 @@ class OCRManager:
         self.base_url = ""
         self.model_name = ""
         self._load_config()
-    
+
     def _load_config(self):
-        config_path = "config.json"
+        config_path = get_data_file_path("config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -22,7 +23,7 @@ class OCRManager:
                     self.model_name = config.get('ocr_model_name', '')
             except Exception as e:
                 print(f"加载配置失败: {e}")
-    
+
     def _save_config(self):
         config = {
             'ocr_api_key': self.api_key,
@@ -30,7 +31,8 @@ class OCRManager:
             'ocr_model_name': self.model_name,
         }
         try:
-            with open('config.json', 'w', encoding='utf-8') as f:
+            config_path = get_data_file_path("config.json")
+            with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"保存配置失败: {e}")

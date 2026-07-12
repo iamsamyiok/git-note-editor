@@ -1,7 +1,8 @@
 import os
 from datetime import datetime
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QToolBar, QToolButton, QComboBox, QSpinBox, QInputDialog
+    QWidget, QLabel, QToolBar, QToolButton, QComboBox, QSpinBox, QInputDialog,
+    QApplication
 )
 from PyQt5.QtGui import (
     QPixmap, QPainter, QPen, QColor, QFont,
@@ -24,8 +25,8 @@ class ScreenshotWidget(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
         
-        self.desktop = QApplication.desktop()
-        self.screen_rect = self.desktop.screenGeometry()
+        self.desktop = QApplication.primaryScreen()
+        self.screen_rect = self.desktop.geometry()
         self.setGeometry(self.screen_rect)
         
         self.start_pos = None

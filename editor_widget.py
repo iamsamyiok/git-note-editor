@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import QApplication
 from cloudcode_dialog import CloudCodeTaskDialog
 from cloudcode_result import CloudCodeResultDialog
 from cloudcode_executor import CloudCodeExecutor, TaskStatus
+from path_helper import get_data_file_path
 
 
 class FormatPainterTextEdit(QTextEdit):
@@ -450,7 +451,7 @@ class EditorWidget(QWidget):
             progress.setText("正在识别图片中的文字，请稍候...")
             progress.setStandardButtons(QMessageBox.NoButton)
             progress.show()
-            self.processEvents()
+            QApplication.processEvents()
             
             success, result = ocr_manager.recognize_image(image_path)
             

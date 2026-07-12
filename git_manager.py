@@ -4,7 +4,7 @@ import subprocess
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from models import CommitNode, BranchInfo
+from models import CommitNode
 
 BRANCH_COLORS = [
     "#2196F3", "#FF5722", "#4CAF50", "#FF9800",

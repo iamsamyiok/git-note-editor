@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QTextEdit, QComboBox, QCheckBox, QPushButton, QMessageBox, QProgressDialog
+    QTextEdit, QComboBox, QCheckBox, QPushButton, QMessageBox, QProgressDialog,
+    QApplication
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -163,7 +164,7 @@ class BookmarkDialog(QDialog):
         progress = QProgressDialog("正在获取网页标题...", "取消", 0, 0, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.show()
-        self.processEvents()
+        QApplication.processEvents()
         
         self.fetch_thread = FetchTitleThread(url)
         self.fetch_thread.title_fetched.connect(self._on_title_fetched)

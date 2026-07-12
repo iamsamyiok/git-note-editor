@@ -25,6 +25,7 @@ from chat_widget import ChatWidget
 from cloudcode_executor import CloudCodeExecutor, TaskStatus
 from cloudcode_dialog import CloudCodeTaskDialog
 from reminder_widget import ReminderWidget
+from path_helper import resource_path, get_data_file_path
 
 
 class MainWindow(QMainWindow):
@@ -36,7 +37,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1200, 700)
         self.resize(1400, 850)
 
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+        icon_path = resource_path("icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -418,8 +419,9 @@ class MainWindow(QMainWindow):
 
     def _show_screenshot_widget(self):
         if self.screenshot_widget:
+            screen = QApplication.primaryScreen()
             self.screenshot_widget.setGeometry(
-                QApplication.desktop().screenGeometry()
+                screen.geometry()
             )
             self.screenshot_widget.show()
             self.screenshot_widget.setFocus()
@@ -447,10 +449,11 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec_() == SettingsDialog.Accepted:
             config = dialog.get_config()
-            
-            with open('config.json', 'w', encoding='utf-8') as f:
+
+            config_path = get_data_file_path("config.json")
+            with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
-            
+
             self.status_bar.showMessage("设置已保存", 3000)
 
     def closeEvent(self, event):

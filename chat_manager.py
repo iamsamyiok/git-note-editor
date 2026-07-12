@@ -2,10 +2,13 @@ import os
 import json
 from typing import List
 from chat_model import ChatSession, Message
+from path_helper import get_data_file_path
 
 
 class ChatManager:
-    def __init__(self, data_file="chat_sessions.json"):
+    def __init__(self, data_file=None):
+        if data_file is None:
+            data_file = get_data_file_path("chat_sessions.json")
         self.data_file = data_file
         self.sessions: dict[str, ChatSession] = {}
         self.current_session_id: str = ""
