@@ -74,7 +74,7 @@ class BookmarkDialog(QDialog):
         desc_label = QLabel("描述:")
         desc_layout.addWidget(desc_label)
         self.desc_input = QTextEdit()
-        self.desc_input.setPlaceholderText="备注信息（可选）"
+        self.desc_input.setPlaceholderText("备注信息（可选）")
         self.desc_input.setMaximumHeight(80)
         desc_layout.addWidget(self.desc_input)
         layout.addLayout(desc_layout)
@@ -91,7 +91,7 @@ class BookmarkDialog(QDialog):
         tags_label = QLabel("标签（用逗号分隔）:")
         tags_layout.addWidget(tags_label)
         self.tags_input = QLineEdit()
-        self.tags_input.setPlaceholderText="例如：搜索,工具,必备"
+        self.tags_input.setPlaceholderText("例如：搜索,工具,必备")
         tags_layout.addWidget(self.tags_input)
         layout.addLayout(tags_layout)
         
@@ -161,9 +161,9 @@ class BookmarkDialog(QDialog):
         if not url.startswith("http://") and not url.startswith("https://"):
             url = "https://" + url
         
-        progress = QProgressDialog("正在获取网页标题...", "取消", 0, 0, self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.show()
+        self.progress_dialog = QProgressDialog("正在获取网页标题...", "取消", 0, 0, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.show()
         QApplication.processEvents()
         
         self.fetch_thread = FetchTitleThread(url)

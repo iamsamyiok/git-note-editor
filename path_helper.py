@@ -38,3 +38,13 @@ def get_app_data_dir() -> str:
 def get_data_file_path(filename: str) -> str:
     """获取用户数据文件的完整路径。"""
     return os.path.join(get_app_data_dir(), filename)
+
+
+def get_default_font_family() -> str:
+    """返回适合当前平台的中文字体族名。"""
+    if os.name == 'nt':
+        return "Microsoft YaHei"
+    elif sys.platform == 'darwin':
+        return "PingFang SC"
+    else:
+        return "Noto Sans CJK SC"

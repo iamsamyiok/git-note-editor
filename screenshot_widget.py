@@ -8,7 +8,9 @@ from PyQt5.QtGui import (
     QPixmap, QPainter, QPen, QColor, QFont,
     QPolygonF, QBrush, QPainterPath
 )
-from PyQt5.QtCore import Qt, QRect, QPointF, pyqtSignal, QTimer, QEvent
+from PyQt5.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal, QTimer, QEvent
+
+from path_helper import get_data_file_path
 
 
 class ScreenshotWidget(QWidget):
@@ -412,7 +414,7 @@ class ScreenshotWidget(QWidget):
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"screenshot_{timestamp}.png"
-        imgs_dir = "imgs"
+        imgs_dir = get_data_file_path("imgs")
         os.makedirs(imgs_dir, exist_ok=True)
         filepath = os.path.join(imgs_dir, filename)
         result_pixmap.save(filepath)

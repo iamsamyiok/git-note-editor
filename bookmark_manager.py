@@ -1,11 +1,12 @@
 import os
 import json
 from bookmark_model import Bookmark
+from path_helper import get_data_file_path
 
 
 class BookmarkManager:
-    def __init__(self, data_file="bookmarks.json"):
-        self.data_file = data_file
+    def __init__(self, data_file=None):
+        self.data_file = data_file or get_data_file_path("bookmarks.json")
         self.bookmarks: dict[str, Bookmark] = {}
         self.categories = ["全部", "默认分类", "工作相关", "学习资料", "娱乐休闲", "工具"]
         self._load_data()

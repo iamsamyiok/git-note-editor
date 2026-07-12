@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QShortcut, QTabWidget,
 )
 from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtCore import Qt, QRectF, QTimer, QEvent
+from PyQt5.QtCore import Qt, QRectF, QTimer, QEvent, QSize
 
 from version_manager import VersionManager, BRANCH_COLORS
 from graph_widget import GraphView
@@ -278,7 +278,14 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("提交已删除，图谱已更新")
 
     def _on_editor_changed(self):
-        pass
+        if self.editor.is_modified():
+            title = self.windowTitle()
+            if not title.startswith("*"):
+                self.setWindowTitle("*" + title)
+        else:
+            title = self.windowTitle()
+            if title.startswith("*"):
+                self.setWindowTitle(title[1:])
 
     def _on_export(self, fmt: str):
         if not self.vm.repo_ok():
@@ -336,29 +343,50 @@ class MainWindow(QMainWindow):
             f.write(self.editor.to_html())
 
     def _export_png(self, path: str):
-        from PyQt5.QtGui import QImage, QPainter
+        from PyQt5.QtGui import QImage, QPainter, QTextDocument
+
         qte = self.editor.editor
-        content_height = int(qte.document().size().height()) + 20
-        content_width = int(qte.viewport().width())
-        pixmap = qte.grab(qte.viewport().rect())
-        pixmap.save(path, "PNG")
+        doc = QTextDocument()
+        doc.setHtml(self.editor.to_html())
+
+        page_width = qte.viewport().width()
+        page_size = qte.viewport().size()
+        doc.setPageSize(page_size)
+
+        content_height = int(doc.size().height()) + 20
+        content_width = page_width
+
+        image = QImage(content_width, content_height, QImage.Format_ARGB32)
+        image.fill(Qt.white)
+
+        painter = QPainter(image)
+        doc.drawContents(painter)
+        painter.end()
+
+        image.save(path, "PNG")
 
     def _export_svg(self, path: str):
         from PyQt5.QtSvg import QSvgGenerator
-        from PyQt5.QtGui import QPainter as QPt
+        from PyQt5.QtGui import QPainter as QPt, QTextDocument
 
         qte = self.editor.editor
-        content_height = int(qte.document().size().height()) + 20
-        content_width = int(qte.viewport().width())
+        doc = QTextDocument()
+        doc.setHtml(self.editor.to_html())
+
+        page_width = qte.viewport().width()
+        page_size = qte.viewport().size()
+        doc.setPageSize(page_size)
+
+        content_height = int(doc.size().height()) + 20
+        content_width = page_width
 
         generator = QSvgGenerator()
         generator.setFileName(path)
-        generator.setSize(qte.viewport().size())
+        generator.setSize(QSize(content_width, content_height))
         generator.setViewBox(QRectF(0, 0, content_width, content_height))
 
-        qte.document().setPageSize(qte.viewport().size())
         painter = QPt(generator)
-        qte.document().drawContents(painter)
+        doc.drawContents(painter)
         painter.end()
 
     def _refresh_graph(self):
@@ -427,15 +455,31 @@ class MainWindow(QMainWindow):
             self.screenshot_widget.setFocus()
 
     def _on_screenshot_taken(self, filepath):
+        if not filepath or not os.path.exists(filepath):
+            self.setGeometry(self.window_geometry)
+            self.setWindowState(self.window_state)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            return
+
+        img_src = filepath
+        if self.vm.repo_ok() and self.vm.imgs_dir:
+            import shutil
+            filename = os.path.basename(filepath)
+            dst = os.path.join(self.vm.imgs_dir, filename)
+            shutil.copy2(filepath, dst)
+            img_src = os.path.join("imgs", filename).replace("\\", "/")
+
         html = f'''
         <div style="display:block; margin: 10px 0;">
-            <img src="{filepath}" width="100%">
+            <img src="{img_src}" width="100%">
         </div>
         <br>
         '''
         cursor = self.editor.editor.textCursor()
         cursor.insertHtml(html)
-        
+
         self.setGeometry(self.window_geometry)
         self.setWindowState(self.window_state)
         self.show()

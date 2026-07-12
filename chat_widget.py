@@ -13,7 +13,7 @@ from chat_message_widget import ChatMessageWidget
 from ai_service import AIService
 from cloudcode_dialog import CloudCodeTaskDialog
 from cloudcode_result import CloudCodeResultDialog
-from cloudcode_executor import CloudCodeExecutor, TaskStatus, TaskStatus
+from cloudcode_executor import CloudCodeExecutor, TaskStatus
 
 
 class ChatWidget(QWidget):

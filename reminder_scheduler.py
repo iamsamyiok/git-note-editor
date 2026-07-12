@@ -70,5 +70,7 @@ class ReminderScheduler(QObject):
             self.task_manager.complete_task(task_id)
         elif action == "snooze":
             self.task_manager.snooze_task(task_id)
+        elif action == "dismiss":
+            self.task_manager.complete_task(task_id)
 
         self.stop_sound()

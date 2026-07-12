@@ -14,6 +14,7 @@ from PyQt5.QtCore import (
 )
 
 from models import CommitNode
+from path_helper import get_default_font_family
 
 NODE_RADIUS = 12
 ROOT_RADIUS = 20
@@ -83,14 +84,14 @@ class CommitNodeItem(QGraphicsItem):
             painter.drawEllipse(QPointF(cx, cy), r + 2, r + 2)
 
         if self.commit.is_root:
-            font = QFont("Microsoft YaHei", 8, QFont.Bold)
+            font = QFont(get_default_font_family(), 8, QFont.Bold)
             painter.setFont(font)
             painter.setPen(QPen(Qt.white))
             painter.drawText(QRectF(-r + 2, -6, r * 2 - 4, 12), Qt.AlignCenter, "根")
 
         label = self._format_label()
         if label:
-            font = QFont("Microsoft YaHei", 8)
+            font = QFont(get_default_font_family(), 8)
             painter.setFont(font)
             painter.setPen(QPen(QColor("#222222")))
             text_rect = QRectF(r + 10, -20, LABEL_WIDTH, 40)
@@ -310,7 +311,7 @@ class GraphView(QWidget):
                         color = QColor("#4CAF50")
                     else:
                         color = QColor(c.branch_color or "#9E9E9E")
-                    font = QFont("Microsoft YaHei", 9, QFont.Bold)
+                    font = QFont(get_default_font_family(), 9, QFont.Bold)
 
                     text = self._scene.addText(c.branch_name, font)
                     text.setDefaultTextColor(color)

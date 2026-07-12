@@ -207,13 +207,15 @@ class ReminderWidget(QWidget):
         dialog.exec_()
 
     def on_dialog_action(self, task_id, action):
+        self.scheduler.handle_task_action(task_id, action)
+
         if action == "snooze":
-            self.task_manager.snooze_task(task_id)
             self.status_update.emit("任务已延后 5 分钟")
         elif action == "complete":
-            if self.task_manager.get_task(task_id).trigger_type == TriggerType.ONCE:
-                self.refresh_tasks()
+            self.refresh_tasks()
             self.status_update.emit("任务已完成")
+        elif action == "dismiss":
+            pass
 
     def start_scheduler(self):
         self.scheduler.start()

@@ -315,12 +315,10 @@ class EditorWidget(QWidget):
             menu.exec_(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _on_editor_context_menu(self, pos):
-        cursor = self.editor.textCursor()
-        cursor.setPosition(self.editor.anchorAt(pos))
-        
+        cursor = self.editor.cursorForPosition(pos)
         char_format = cursor.charFormat()
         is_image = char_format.isImageFormat()
-        
+
         if is_image:
             self._show_image_context_menu(cursor, pos)
     

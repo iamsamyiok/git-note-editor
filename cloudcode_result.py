@@ -6,6 +6,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QTextCursor, QTextBlock
 
 from cloudcode_executor import CloudCodeTask, TaskStatus
+from path_helper import get_default_font_family
 
 
 class CloudCodeResultDialog(QDialog):
@@ -42,7 +43,7 @@ class CloudCodeResultDialog(QDialog):
             status_color = "#6c757d"
         
         status_label = QLabel(f"{status_icon} {status_text}")
-        status_label.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
+        status_label.setFont(QFont(get_default_font_family(), 14, QFont.Bold))
         status_label.setStyleSheet(f"color: {status_color};")
         header_layout.addWidget(status_label)
         
@@ -127,7 +128,7 @@ class CloudCodeResultDialog(QDialog):
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
         self.output_text.setFont(QFont("Consolas", 10))
-        output_text.setStyleSheet("background: #f8f9fa;")
+        self.output_text.setStyleSheet("background: #f8f9fa;")
         output_layout.addWidget(self.output_text)
         
         output_group.setLayout(output_layout)
