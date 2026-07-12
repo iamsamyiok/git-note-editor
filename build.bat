@@ -5,7 +5,7 @@ echo   版本化富文本笔记工具 - 打包构建
 echo ========================================
 echo.
 
-python -m pip install pyinstaller -q
+python -m pip install pyinstaller Pillow -q
 if errorlevel 1 (
     echo [错误] pip install 失败，请检查 Python 环境
     pause
