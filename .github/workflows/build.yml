@@ -21,14 +21,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt5 pyinstaller Pillow
 
-      - name: Convert PNG to ICO
-        run: |
-          python -c "
-from PIL import Image
-img = Image.open('icon.png')
-img.save('icon.ico', format='ICO', sizes=[(48,48),(32,32),(16,16)])
-print('ICO created')
-"
+      - name: Generate icon
+        run: python make_icon.py
 
       - name: Build EXE
         run: |
