@@ -26,7 +26,7 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --onefile --windowed --noupx --name "GitNoteEditor" --icon=icon.ico --add-data "icon.png;." --hidden-import requests --hidden-import beautifulsoup4 --hidden-import bs4 --hidden-import lxml --hidden-import PIL --hidden-import PIL.Image --hidden-import PIL.ImageQt --hidden-import pynput --hidden-import pynput.keyboard --hidden-import pynput.mouse --hidden-import urllib3 --hidden-import charset_normalizer --hidden-import certifi --hidden-import idna --clean main.py
+          pyinstaller --onefile --windowed --noupx --name "GitNoteEditor" --icon=icon.ico --add-data "icon.png;." --hidden-import requests --hidden-import beautifulsoup4 --hidden-import bs4 --hidden-import lxml --hidden-import PIL --hidden-import PIL.Image --hidden-import PIL.ImageQt --hidden-import pynput --hidden-import pynput.keyboard --hidden-import pynput.mouse --hidden-import urllib3 --hidden-import charset_normalizer --hidden-import certifi --hidden-import idna --additional-hooks-dir=hooks --clean main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
