@@ -6,7 +6,7 @@ import json
 from PyQt5.QtWidgets import (
     QMainWindow, QSplitter, QAction, QFileDialog,
     QStatusBar, QMessageBox, QApplication,
-    QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QShortcut,
+    QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QShortcut, QTabWidget,
 )
 from PyQt5.QtGui import QIcon, QKeySequence
 from PyQt5.QtCore import Qt, QRectF, QTimer, QEvent
@@ -20,6 +20,7 @@ from dialogs import (
 )
 from screenshot_widget import ScreenshotWidget
 from settings_dialog import SettingsDialog
+from bookmark_widget import BookmarkWidget
 
 
 class MainWindow(QMainWindow):
@@ -35,8 +36,16 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
+
+        self.note_widget = QWidget()
+        note_layout = QVBoxLayout(self.note_widget)
+        note_layout.setContentsMargins(0, 0, 0, 0)
+        note_layout.setSpacing(0)
+
         self.splitter = QSplitter(Qt.Horizontal)
-        self.setCentralWidget(self.splitter)
+        note_layout.addWidget(self.splitter)
 
         self.graph_view = GraphView()
         self.editor = EditorWidget()
@@ -44,6 +53,10 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.editor)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 2)
+
+        self.bookmark_widget = BookmarkWidget()
+        self.tab_widget.addTab(self.note_widget, "📝 笔记")
+        self.tab_widget.addTab(self.bookmark_widget, "🔗 网址收藏")
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -75,6 +88,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+M"), self, self._on_commit)
         QShortcut(QKeySequence("Ctrl+B"), self, self._on_new_branch)
         QShortcut(QKeySequence("Ctrl+P"), self, lambda: self._on_export("pdf"))
+        QShortcut(QKeySequence("Ctrl+Shift+A"), self, self._switch_to_bookmarks)
+    def _switch_to_bookmarks(self):
+        self.tab_widget.setCurrentIndex(1)
 
     def _on_new_file(self):
         if not self._check_dirty():
