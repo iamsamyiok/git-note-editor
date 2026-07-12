@@ -3,8 +3,10 @@ import sys
 
 from PyQt5.QtWidgets import (
     QMainWindow, QSplitter, QAction, QFileDialog,
-    QStatusBar, QMessageBox, QApplication,
+    QStatusBar, QMessageBox, QApplication, QToolBar,
+    QWidget, QVBoxLayout, QPushButton, QHBoxLayout,
 )
+from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt
 
 from version_manager import VersionManager, BRANCH_COLORS
@@ -21,11 +23,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.vm = VersionManager()
 
-        self.setWindowTitle("Git 版本化富文本笔记工具")
+        self.setWindowTitle("版本化富文本笔记")
         self.setMinimumSize(1200, 700)
         self.resize(1400, 850)
 
-        self._setup_menu()
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
+        self._setup_toolbar()
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.setCentralWidget(self.splitter)
@@ -46,34 +52,37 @@ class MainWindow(QMainWindow):
         self.graph_view.graph_refresh_requested.connect(self._refresh_graph)
         self.editor.content_changed.connect(self._on_editor_changed)
 
-    def _setup_menu(self):
-        menu = self.menuBar()
+    def _setup_toolbar(self):
+        toolbar = self.addToolBar("主工具栏")
+        toolbar.setMovable(False)
+        toolbar.setIconSize(toolbar.iconSize())
 
-        file_menu = menu.addMenu("文件(&F)")
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+        icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
 
-        new_action = QAction("新建文件(&N)", self)
+        new_action = QAction(icon, "新建笔记", self)
         new_action.setShortcut("Ctrl+N")
         new_action.triggered.connect(self._on_new_file)
-        file_menu.addAction(new_action)
+        toolbar.addAction(new_action)
 
-        open_action = QAction("打开文件(&O)", self)
+        open_action = QAction("打开笔记", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._on_open_file)
-        file_menu.addAction(open_action)
+        toolbar.addAction(open_action)
 
-        file_menu.addSeparator()
+        toolbar.addSeparator()
 
-        self.commit_action = QAction("Commit 提交(&C)", self)
+        self.commit_action = QAction("提交变更", self)
         self.commit_action.setShortcut("Ctrl+Return")
         self.commit_action.triggered.connect(self._on_commit)
         self.commit_action.setEnabled(False)
-        file_menu.addAction(self.commit_action)
+        toolbar.addAction(self.commit_action)
 
-        self.branch_action = QAction("新建分支(&B)", self)
+        self.branch_action = QAction("新建分支", self)
         self.branch_action.setShortcut("Ctrl+B")
         self.branch_action.triggered.connect(self._on_new_branch)
         self.branch_action.setEnabled(False)
-        file_menu.addAction(self.branch_action)
+        toolbar.addAction(self.branch_action)
 
     def _on_new_file(self):
         if not self._check_dirty():
@@ -84,7 +93,7 @@ class MainWindow(QMainWindow):
             return
 
         name, ok = QFileDialog.getSaveFileName(
-            self, "笔记文件名", folder, "HTML Files (*.html)"
+            self, "笔记文件名", folder, "HTML 文件 (*.html)"
         )
         if not ok or not name:
             return
@@ -97,16 +106,14 @@ class MainWindow(QMainWindow):
             self.branch_action.setEnabled(True)
             self._refresh_graph()
             self.status_bar.showMessage(f"已创建：{name}")
-            self.setWindowTitle(
-                f"Git 版本化富文本笔记工具 — {os.path.basename(name)}"
-            )
+            self.setWindowTitle(f"版本化富文本笔记 — {os.path.basename(name)}")
 
     def _on_open_file(self):
         if not self._check_dirty():
             return
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "打开笔记文件", "", "HTML Files (*.html)"
+            self, "打开笔记文件", "", "HTML 文件 (*.html)"
         )
         if not path:
             return
@@ -128,9 +135,7 @@ class MainWindow(QMainWindow):
         self._refresh_graph()
 
         self.status_bar.showMessage(f"已打开：{path}")
-        self.setWindowTitle(
-            f"Git 版本化富文本笔记工具 — {os.path.basename(path)}"
-        )
+        self.setWindowTitle(f"版本化富文本笔记 — {os.path.basename(path)}")
 
     def _on_commit(self):
         if not self.vm.repo_ok():

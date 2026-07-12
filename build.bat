@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo   Git 版本化富文本笔记工具 - 打包构建
+echo   版本化富文本笔记工具 - 打包构建
 echo ========================================
 echo.
 
@@ -12,9 +12,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo [信息] 生成图标...
+python -c "from PIL import Image; img=Image.open('icon.png'); img.save('icon.ico',format='ICO',sizes=[(48,48),(32,32),(16,16)]); print('OK')"
+
 echo [信息] 正在打包为单文件 EXE ...
 pyinstaller --onefile --windowed --noupx ^
     --name "GitNoteEditor" ^
+    --icon=icon.ico ^
+    --add-data "icon.png;." ^
     --hidden-import PyQt5 ^
     --hidden-import PyQt5.QtCore ^
     --hidden-import PyQt5.QtGui ^

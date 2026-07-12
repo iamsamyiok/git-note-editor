@@ -1,9 +1,9 @@
-import math
-from typing import Dict, Optional
+from typing import Dict
 
 from PyQt5.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsItem,
-    QMenu, QAction, QMessageBox,
+    QMenu, QAction, QWidget, QVBoxLayout, QPushButton,
+    QHBoxLayout,
 )
 from PyQt5.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QPainterPath,
@@ -15,16 +15,12 @@ from PyQt5.QtCore import (
 
 from models import CommitNode
 
-BRANCH_COLORS = [
-    "#2196F3", "#FF5722", "#4CAF50", "#FF9800",
-    "#9C27B0", "#00BCD4", "#795548", "#607D8B",
-]
-
 NODE_RADIUS = 12
 ROOT_RADIUS = 20
 BRANCH_START_RADIUS = 16
-LANE_WIDTH = 200
-ROW_HEIGHT = 80
+LANE_WIDTH = 220
+ROW_HEIGHT = 90
+LABEL_WIDTH = 180
 
 
 class CommitNodeItem(QGraphicsItem):
@@ -46,8 +42,7 @@ class CommitNodeItem(QGraphicsItem):
 
     def boundingRect(self) -> QRectF:
         r = self.radius()
-        pad = 4
-        return QRectF(-r - pad, -r - pad, (r + pad) * 2, (r + pad) * 2)
+        return QRectF(-r - 4, -r - 4, r * 2 + LABEL_WIDTH + 10, r * 2 + 20)
 
     def paint(self, painter: QPainter, option, widget):
         painter.setRenderHint(QPainter.Antialiasing)
@@ -91,23 +86,26 @@ class CommitNodeItem(QGraphicsItem):
             font = QFont("Microsoft YaHei", 8, QFont.Bold)
             painter.setFont(font)
             painter.setPen(QPen(Qt.white))
-            text_rect = QRectF(-r + 2, -6, r * 2 - 4, 12)
-            painter.drawText(text_rect, Qt.AlignCenter, "根")
+            painter.drawText(QRectF(-r + 2, -6, r * 2 - 4, 12), Qt.AlignCenter, "根")
 
-        label = self._short_label()
+        label = self._format_label()
         if label:
-            font = QFont("Microsoft YaHei", 7)
+            font = QFont("Microsoft YaHei", 8)
             painter.setFont(font)
-            painter.setPen(QPen(QColor("#333333")))
-            text_rect = QRectF(r + 6, -14, 140, 28)
+            painter.setPen(QPen(QColor("#222222")))
+            text_rect = QRectF(r + 10, -20, LABEL_WIDTH, 40)
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, label)
 
-    def _short_label(self) -> str:
-        msg = self.commit.message
-        parts = msg.split("-", 1)
-        if len(parts) >= 2:
-            return f"{parts[0]}\n{parts[1][:16]}"
-        return msg[:20]
+    def _format_label(self) -> str:
+        msg = self.commit.message or ""
+        if "-" in msg:
+            parts = msg.split("-", 1)
+            date_str = parts[0].replace(".", "-")
+            desc = parts[1].strip()
+            if len(desc) > 30:
+                desc = desc[:28] + ".."
+            return f"{date_str}\n{desc}"
+        return msg[:40]
 
     def set_hovered(self, val: bool):
         self._hovered = val
@@ -132,22 +130,58 @@ class CommitNodeItem(QGraphicsItem):
         super().mousePressEvent(event)
 
 
-class GraphView(QGraphicsView):
+class GraphView(QWidget):
     node_clicked = pyqtSignal(str)
     delete_requested = pyqtSignal(str)
     graph_refresh_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._scene = QGraphicsScene(self)
-        self.setScene(self._scene)
-        self.setRenderHint(QPainter.Antialiasing)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        self._view = QGraphicsView()
+        self._scene = QGraphicsScene()
+        self._view.setScene(self._scene)
+        self._view.setRenderHint(QPainter.Antialiasing)
+        self._view.setDragMode(QGraphicsView.ScrollHandDrag)
+        self._view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._view.mouseReleaseEvent = self._mouse_release
+        self._view.wheelEvent = self._wheel_event
+        self._view.contextMenuEvent = self._context_menu
+
+        layout.addWidget(self._view)
+
+        zoom_layout = QHBoxLayout()
+        zoom_layout.setContentsMargins(4, 2, 4, 2)
+        zoom_layout.addStretch()
+
+        self.zoom_label = QPushButton("100%")
+        self.zoom_label.setFixedSize(50, 24)
+        self.zoom_label.setStyleSheet("font-size:11px;")
+        self.zoom_label.clicked.connect(self._zoom_reset)
+        zoom_layout.addWidget(self.zoom_label)
+
+        zoom_out_btn = QPushButton("−")
+        zoom_out_btn.setFixedSize(28, 24)
+        zoom_out_btn.setStyleSheet("font-size:16px; font-weight:bold;")
+        zoom_out_btn.clicked.connect(self._zoom_out)
+        zoom_layout.addWidget(zoom_out_btn)
+
+        zoom_in_btn = QPushButton("+")
+        zoom_in_btn.setFixedSize(28, 24)
+        zoom_in_btn.setStyleSheet("font-size:16px; font-weight:bold;")
+        zoom_in_btn.clicked.connect(self._zoom_in)
+        zoom_layout.addWidget(zoom_in_btn)
+
+        layout.addLayout(zoom_layout)
+
         self._nodes: Dict[str, CommitNodeItem] = {}
         self._branch_labels = []
         self._current_hash = ""
+        self._zoom_level = 1.0
 
     def set_commits(self, commits: Dict[str, CommitNode], current_hash: str):
         self._scene.clear()
@@ -178,13 +212,13 @@ class GraphView(QGraphicsView):
         max_row = max((c.row for c in commits.values()), default=0)
         scene_rect = QRectF(
             0, 0,
-            max_lane * LANE_WIDTH + 40,
+            max_lane * LANE_WIDTH + 60,
             max_row * ROW_HEIGHT + ROW_HEIGHT + 40,
         )
         self._scene.setSceneRect(scene_rect)
 
         if current_hash and current_hash in self._nodes:
-            self.centerOn(self._nodes[current_hash])
+            self._view.centerOn(self._nodes[current_hash])
 
     def _draw_connections(self, commits: Dict[str, CommitNode]):
         for h, c in commits.items():
@@ -205,8 +239,10 @@ class GraphView(QGraphicsView):
 
                 path = QPainterPath()
                 if c.lane == child.lane:
-                    path.moveTo(p1.x(), p1.y() + r)
-                    path.lineTo(p2.x(), p2.y() - child_item.radius())
+                    start_y = p1.y() + r
+                    end_y = p2.y() - child_item.radius()
+                    path.moveTo(p1.x(), start_y)
+                    path.lineTo(p2.x(), end_y)
                 else:
                     start_y = p1.y() + r
                     end_y = p2.y() - child_item.radius()
@@ -241,32 +277,25 @@ class GraphView(QGraphicsView):
 
                     self._branch_labels.append(text)
 
-    def mouseReleaseEvent(self, event):
+    def _mouse_release(self, event):
         if event.button() == Qt.LeftButton:
-            item = self.itemAt(event.pos())
+            item = self._view.itemAt(event.pos())
             if isinstance(item, CommitNodeItem):
                 self._select_node(item.commit.hash)
                 self.node_clicked.emit(item.commit.hash)
-        super().mouseReleaseEvent(event)
+        QGraphicsView.mouseReleaseEvent(self._view, event)
 
-    def wheelEvent(self, event):
+    def _wheel_event(self, event):
         if event.modifiers() & Qt.ControlModifier:
             factor = 1.15 if event.angleDelta().y() > 0 else 0.87
-            self.scale(factor, factor)
+            self._view.scale(factor, factor)
+            self._zoom_level *= factor
+            self.zoom_label.setText(f"{int(self._zoom_level * 100)}%")
         else:
-            super().wheelEvent(event)
+            QGraphicsView.wheelEvent(self._view, event)
 
-    def _select_node(self, hash_value: str):
-        for h, item in self._nodes.items():
-            item.set_selected(h == hash_value)
-
-    def select_node(self, hash_value: str):
-        self._select_node(hash_value)
-        if hash_value in self._nodes:
-            self.centerOn(self._nodes[hash_value])
-
-    def contextMenuEvent(self, event):
-        item = self.itemAt(event.pos())
+    def _context_menu(self, event):
+        item = self._view.itemAt(event.pos())
         if isinstance(item, CommitNodeItem):
             menu = QMenu(self)
 
@@ -285,3 +314,27 @@ class GraphView(QGraphicsView):
             menu.addAction(refresh_action)
 
             menu.exec_(event.globalPos())
+
+    def _select_node(self, hash_value: str):
+        for h, item in self._nodes.items():
+            item.set_selected(h == hash_value)
+
+    def select_node(self, hash_value: str):
+        self._select_node(hash_value)
+        if hash_value in self._nodes:
+            self._view.centerOn(self._nodes[hash_value])
+
+    def _zoom_in(self):
+        self._view.scale(1.2, 1.2)
+        self._zoom_level *= 1.2
+        self.zoom_label.setText(f"{int(self._zoom_level * 100)}%")
+
+    def _zoom_out(self):
+        self._view.scale(0.83, 0.83)
+        self._zoom_level *= 0.83
+        self.zoom_label.setText(f"{int(self._zoom_level * 100)}%")
+
+    def _zoom_reset(self):
+        self._view.resetTransform()
+        self._zoom_level = 1.0
+        self.zoom_label.setText("100%")

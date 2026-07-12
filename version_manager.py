@@ -115,7 +115,7 @@ class VersionManager:
         full_msg = f"{stamp}-{user_msg}"
         new_id = self._new_id()
         branch = meta["current_branch"]
-        parent_id = meta["branches"].get(branch, "")
+        parent_id = self.current_commit if self.current_commit else meta["branches"].get(branch, "")
 
         current_html = ""
         if os.path.exists(self.html_file):
@@ -125,10 +125,18 @@ class VersionManager:
         with open(self._version_path(new_id), "w", encoding="utf-8") as f:
             f.write(current_html)
 
-        is_branch_start = False
+        parent_branch = ""
         if parent_id:
             parent_commit = self._find_commit(meta, parent_id)
-            if parent_commit and parent_commit.get("branch_name") != branch:
+            if parent_commit:
+                parent_branch = parent_commit.get("branch_name", "")
+
+        is_branch_start = False
+
+        if branch != "main":
+            if parent_branch == "main":
+                is_branch_start = True
+            elif not parent_id:
                 is_branch_start = True
 
         commit_data = {

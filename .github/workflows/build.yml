@@ -21,9 +21,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt5 pyinstaller
 
+      - name: Convert PNG to ICO
+        run: |
+          python -c "
+from PIL import Image
+img = Image.open('icon.png')
+img.save('icon.ico', format='ICO', sizes=[(48,48),(32,32),(16,16)])
+print('ICO created')
+"
+
       - name: Build EXE
         run: |
-          pyinstaller --onefile --windowed --noupx --name "GitNoteEditor" --hidden-import PyQt5 --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets --clean main.py
+          pyinstaller --onefile --windowed --noupx --name "GitNoteEditor" --icon=icon.ico --add-data "icon.png;." --hidden-import PyQt5 --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets --clean main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
