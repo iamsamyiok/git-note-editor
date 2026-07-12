@@ -2,38 +2,24 @@ import os
 import sys
 
 from PyQt5.QtWidgets import (
-    QMainWindow, QSplitter, QMenuBar, QAction, QFileDialog,
+    QMainWindow, QSplitter, QAction, QFileDialog,
     QStatusBar, QMessageBox, QApplication,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt
 
-from git_manager import GitManager
-from git_installer import check_git, install_git
+from version_manager import VersionManager, BRANCH_COLORS
 from graph_widget import GraphView
 from editor_widget import EditorWidget
 from dialogs import (
-    CommitDialog, BranchDialog, GitInstallDialog,
-    unsaved_changes_dialog, confirm_discard, show_info, show_error,
+    CommitDialog, BranchDialog,
+    unsaved_changes_dialog, show_info, show_error,
 )
-
-BRANCH_COLORS = [
-    "#2196F3", "#FF5722", "#4CAF50", "#FF9800",
-    "#9C27B0", "#00BCD4", "#795548", "#607D8B",
-]
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.current_hash = ""
-        self.ignore_editor_change = False
-
-        ok, git_exe, msg = check_git()
-        if not ok:
-            self._handle_no_git()
-            return
-
-        self.git = GitManager(git_exe=git_exe)
+        self.vm = VersionManager()
 
         self.setWindowTitle("Git 版本化富文本笔记工具")
         self.setMinimumSize(1200, 700)
@@ -89,19 +75,6 @@ class MainWindow(QMainWindow):
         self.branch_action.setEnabled(False)
         file_menu.addAction(self.branch_action)
 
-    def _handle_no_git(self):
-        dlg = GitInstallDialog(self)
-        if dlg.exec_() == GitInstallDialog.Accepted:
-            dlg.show_progress("正在从清华镜像下载 Git...")
-            QApplication.processEvents()
-            ok = install_git(self)
-            if ok:
-                dlg.status_label.setText("安装完成！")
-                show_info(self, "安装成功", "Git 已安装，请重启程序。")
-            else:
-                show_error(self, "安装失败", "Git 安装失败，请手动安装。")
-        self.close()
-
     def _on_new_file(self):
         if not self._check_dirty():
             return
@@ -116,8 +89,8 @@ class MainWindow(QMainWindow):
         if not ok or not name:
             return
 
-        if self.git.init_repo(os.path.dirname(name), os.path.basename(name)):
-            self.editor.imgs_dir = self.git.imgs_dir
+        if self.vm.init_repo(os.path.dirname(name), os.path.basename(name)):
+            self.editor.imgs_dir = self.vm.imgs_dir
             self.editor.set_html("<html><body></body></html>")
             self.editor.set_modified(False)
             self.commit_action.setEnabled(True)
@@ -138,14 +111,14 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        ok, err = self.git.open_repo(path)
+        ok, err = self.vm.open_repo(path)
         if not ok:
             show_error(self, "打开失败", err)
             return
 
-        self.editor.imgs_dir = self.git.imgs_dir
+        self.editor.imgs_dir = self.vm.imgs_dir
 
-        html = self.git.read_html()
+        html = self.vm.read_html()
         self.editor.set_html(html)
         self.editor.set_modified(False)
 
@@ -160,15 +133,15 @@ class MainWindow(QMainWindow):
         )
 
     def _on_commit(self):
-        if not self.git.repo_ok():
+        if not self.vm.repo_ok():
             return
 
         dlg = CommitDialog(self)
         if dlg.exec_() != CommitDialog.Accepted:
             return
 
-        self.git.write_html(self.editor.to_html())
-        ok, err = self.git.commit(dlg.commit_message())
+        self.vm.write_html(self.editor.to_html())
+        ok, err = self.vm.commit(dlg.commit_message())
         if not ok:
             show_error(self, "提交失败", err)
             return
@@ -178,71 +151,66 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("提交成功")
 
     def _on_new_branch(self):
-        if not self.git.repo_ok():
+        if not self.vm.repo_ok():
             return
 
-        if not self.current_hash:
+        if not self.vm.current_commit:
             show_info(self, "提示", "请先在左侧图谱中选中一个节点作为分支起点。")
             return
 
-        branches = self.git._branches()
+        branches = self.vm.branches()
         dlg = BranchDialog(branches, self)
         if dlg.exec_() != BranchDialog.Accepted:
             return
 
-        ok, err = self.git.create_branch(dlg.branch_name(), self.current_hash)
+        from_commit = self.vm.current_commit
+        ok, err = self.vm.create_branch(dlg.branch_name(), from_commit)
         if not ok:
             show_error(self, "创建分支失败", err)
             return
 
-        ok2, err2 = self.git.switch_branch(dlg.branch_name())
-        if not ok2:
-            show_error(self, "切换分支失败", err2)
-            return
-
-        html = self.git.read_html()
+        html = self.vm.read_html()
         self.editor.set_html(html)
         self.editor.set_modified(False)
         self._refresh_graph()
-        self.status_bar.showMessage(f"已切换到分支：{dlg.branch_name()}")
+        self.status_bar.showMessage(f"已创建并切换到分支：{dlg.branch_name()}")
 
     def _on_node_clicked(self, hash_value: str):
-        if not self.git.repo_ok():
+        if not self.vm.repo_ok():
             return
 
-        if hash_value == self.current_hash:
+        if hash_value == self.vm.current_commit:
             return
 
         if self.editor.is_modified():
             result = unsaved_changes_dialog(self)
             if result == "cancel":
-                self.graph_view.select_node(self.current_hash)
+                self.graph_view.select_node(self.vm.current_commit)
                 return
             elif result == "commit":
                 self._on_commit()
                 if self.editor.is_modified():
-                    self.graph_view.select_node(self.current_hash)
+                    self.graph_view.select_node(self.vm.current_commit)
                     return
             elif result == "discard":
                 pass
 
-        ok, err = self.git.checkout_commit(hash_value)
+        ok, err = self.vm.checkout_commit(hash_value)
         if not ok:
             show_error(self, "切换失败", err)
-            self.graph_view.select_node(self.current_hash)
+            self.graph_view.select_node(self.vm.current_commit)
             return
 
-        self.current_hash = hash_value
-        html = self.git.read_html()
+        html = self.vm.read_html()
         self.editor.set_html(html)
         self.editor.set_modified(False)
         self.status_bar.showMessage(f"已切换到：{hash_value[:8]}")
 
     def _on_delete_requested(self, hash_value: str):
-        if not self.git.repo_ok():
+        if not self.vm.repo_ok():
             return
 
-        if self.git.is_root(hash_value):
+        if self.vm.is_root(hash_value):
             QMessageBox.information(self, "提示", "根节点不可删除。")
             return
 
@@ -255,28 +223,26 @@ class MainWindow(QMainWindow):
         if result != QMessageBox.Yes:
             return
 
-        ok, err = self.git.delete_commit(hash_value)
+        ok, err = self.vm.delete_commit(hash_value)
         if not ok:
             show_error(self, "删除失败", err)
             return
 
-        self.current_hash = self.git.current_hash()
-        html = self.git.read_html()
+        html = self.vm.read_html()
         self.editor.set_html(html)
         self.editor.set_modified(False)
         self._refresh_graph()
         self.status_bar.showMessage("提交已删除，图谱已更新")
 
     def _on_editor_changed(self):
-        if self.ignore_editor_change:
-            return
+        pass
 
     def _refresh_graph(self):
-        if not self.git.repo_ok():
+        if not self.vm.repo_ok():
             return
 
-        commits = self.git.all_commits()
-        self.current_hash = self.git.current_hash()
+        commits = self.vm.all_commits()
+        cur = self.vm.current_hash()
 
         color_idx = 0
         branch_color_map = {}
@@ -288,15 +254,10 @@ class MainWindow(QMainWindow):
                 color_idx += 1
             c.branch_color = branch_color_map.get(c.branch_name, "#9E9E9E")
 
-        for h, c in commits.items():
-            if not c.parent_hashes:
-                c.is_root = True
-                break
-
-        self.graph_view.set_commits(commits, self.current_hash)
+        self.graph_view.set_commits(commits, cur)
 
     def _check_dirty(self) -> bool:
-        if not self.git.repo_ok():
+        if not self.vm.repo_ok():
             return True
         if not self.editor.is_modified():
             return True
@@ -317,9 +278,8 @@ class MainWindow(QMainWindow):
 
 
 def run():
-    import sys as _sys
-    app = QApplication(_sys.argv)
+    app = QApplication(sys.argv)
     app.setStyle("Fusion")
     window = MainWindow()
     window.show()
-    _sys.exit(app.exec_())
+    sys.exit(app.exec_())

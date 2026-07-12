@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QProgressBar, QTextEdit,
+    QPushButton, QMessageBox, QTextEdit,
 )
 from PyQt5.QtCore import Qt
 
@@ -94,53 +94,6 @@ class BranchDialog(QDialog):
         else:
             self.error_label.setText("")
             self.ok_btn.setEnabled(True)
-
-
-class GitInstallDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("安装 Git")
-        self.setMinimumWidth(380)
-        self.setModal(True)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("未检测到 Git 环境，是否安装？"))
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.hide()
-        layout.addWidget(self.progress)
-
-        self.status_label = QLabel("")
-        layout.addWidget(self.status_label)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-
-        self.install_btn = QPushButton("一键安装 Git")
-        self.install_btn.setDefault(True)
-        self.install_btn.clicked.connect(self._start_install)
-        btn_layout.addWidget(self.install_btn)
-
-        layout.addLayout(btn_layout)
-
-    def show_progress(self, text: str):
-        self.install_btn.hide()
-        self.progress.show()
-        self.status_label.setText(text)
-
-
-def confirm_discard(parent, msg="确定要丢弃未保存的变更吗？") -> bool:
-    result = QMessageBox.question(
-        parent, "未提交变更", msg,
-        QMessageBox.Discard | QMessageBox.Cancel,
-        QMessageBox.Cancel,
-    )
-    return result == QMessageBox.Discard
 
 
 def unsaved_changes_dialog(parent) -> str:

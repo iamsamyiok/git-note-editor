@@ -11,16 +11,8 @@ class CommitNode:
     refs: List[str] = field(default_factory=list)
     children: List[str] = field(default_factory=list)
     branch_name: str = ""
+    branch_color: str = ""
     is_root: bool = False
     is_branch_start: bool = False
     lane: int = 0
     row: int = 0
-
-
-@dataclass
-class BranchInfo:
-    name: str
-    start_commit_hash: str = ""
-    latest_commit_hash: str = ""
-    color: str = ""
-    folded: bool = False
