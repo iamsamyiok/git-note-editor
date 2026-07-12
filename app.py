@@ -24,6 +24,7 @@ from bookmark_widget import BookmarkWidget
 from chat_widget import ChatWidget
 from cloudcode_executor import CloudCodeExecutor, TaskStatus
 from cloudcode_dialog import CloudCodeTaskDialog
+from reminder_widget import ReminderWidget
 
 
 class MainWindow(QMainWindow):
@@ -59,11 +60,14 @@ class MainWindow(QMainWindow):
 
         self.bookmark_widget = BookmarkWidget()
         self.chat_widget = ChatWidget()
+        self.reminder_widget = ReminderWidget()
         self.chat_widget.export_requested.connect(self._on_chat_export)
+        self.reminder_widget.status_update.connect(self._update_status)
         
         self.tab_widget.addTab(self.note_widget, "📝 笔记")
         self.tab_widget.addTab(self.bookmark_widget, "🔗 网址收藏")
         self.tab_widget.addTab(self.chat_widget, "💬 AI聊天")
+        self.tab_widget.addTab(self.reminder_widget, "⏰ 提醒")
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -92,6 +96,8 @@ class MainWindow(QMainWindow):
         self._start_global_hotkey()
         self.window_geometry = self.geometry()
         self.window_state = self.windowState()
+        
+        self.reminder_widget.start_scheduler()
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_file)
