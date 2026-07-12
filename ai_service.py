@@ -1,3 +1,4 @@
+import os
 import json
 import requests
 from chat_model import Message
