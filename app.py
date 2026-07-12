@@ -1,6 +1,7 @@
 import os
 import sys
 import datetime
+import json
 
 from PyQt5.QtWidgets import (
     QMainWindow, QSplitter, QAction, QFileDialog,
@@ -8,7 +9,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QShortcut,
 )
 from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtCore import Qt, QRectF
+from PyQt5.QtCore import Qt, QRectF, QTimer, QEvent
 
 from version_manager import VersionManager, BRANCH_COLORS
 from graph_widget import GraphView
@@ -17,6 +18,8 @@ from dialogs import (
     CommitDialog, BranchDialog,
     unsaved_changes_dialog, show_info, show_error,
 )
+from screenshot_widget import ScreenshotWidget
+from settings_dialog import SettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -56,8 +59,15 @@ class MainWindow(QMainWindow):
         self.editor.open_file_requested.connect(self._on_open_file)
         self.editor.export_requested.connect(self._on_export)
         self.editor.content_changed.connect(self._on_editor_changed)
+        self.editor.settings_requested.connect(self._on_open_settings)
+
+        self.screenshot_widget = ScreenshotWidget()
+        self.screenshot_widget.screenshot_taken.connect(self._on_screenshot_taken)
 
         self._setup_shortcuts()
+        self._start_global_hotkey()
+        self.window_geometry = self.geometry()
+        self.window_state = self.windowState()
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_file)
@@ -352,11 +362,81 @@ class MainWindow(QMainWindow):
             return not self.editor.is_modified()
         return True
 
+    def _start_global_hotkey(self):
+        from pynput import keyboard
+        
+        def on_activate():
+            QApplication.instance().postEvent(
+                self, ScreenshotEvent()
+            )
+        
+        self.hotkey = keyboard.GlobalHotKeys({
+            '<ctrl>+<alt>+s': on_activate
+        })
+        self.hotkey.start()
+
+    def customEvent(self, event):
+        if isinstance(event, ScreenshotEvent):
+            self._trigger_screenshot()
+
+    def _trigger_screenshot(self):
+        self.window_geometry = self.geometry()
+        self.window_state = self.windowState()
+        self.hide()
+        QTimer.singleShot(100, self._show_screenshot_widget)
+
+    def _show_screenshot_widget(self):
+        if self.screenshot_widget:
+            self.screenshot_widget.setGeometry(
+                QApplication.desktop().screenGeometry()
+            )
+            self.screenshot_widget.show()
+            self.screenshot_widget.setFocus()
+
+    def _on_screenshot_taken(self, filepath):
+        html = f'''
+        <div style="display:block; margin: 10px 0;">
+            <img src="{filepath}" width="100%">
+        </div>
+        <br>
+        '''
+        cursor = self.editor.editor.textCursor()
+        cursor.insertHtml(html)
+        
+        self.setGeometry(self.window_geometry)
+        self.setWindowState(self.window_state)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        
+        self.status_bar.showMessage(
+            f"截图已插入：{os.path.basename(filepath)}", 3000
+        )
+
+    def _on_open_settings(self):
+        dialog = SettingsDialog(self)
+        if dialog.exec_() == SettingsDialog.Accepted:
+            config = dialog.get_config()
+            
+            with open('config.json', 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            
+            self.status_bar.showMessage("设置已保存", 3000)
+
     def closeEvent(self, event):
+        if hasattr(self, 'hotkey'):
+            self.hotkey.stop()
         if not self._check_dirty():
             event.ignore()
         else:
             event.accept()
+
+
+class ScreenshotEvent(QEvent):
+    TYPE = QEvent.User + 1
+    
+    def __init__(self):
+        super().__init__(self.TYPE)
 
 
 def run():

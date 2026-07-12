@@ -6,10 +6,11 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import (
     QFont, QColor, QTextCharFormat, QTextListFormat, QImage,
-    QTextCursor, QPainter, QPixmap, QMouseEvent,
+    QTextCursor, QPainter, QPixmap, QMouseEvent, QCursor,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QEvent
 from PyQt5.QtPrintSupport import QPrinter
+from PyQt5.QtWidgets import QApplication
 
 
 class FormatPainterTextEdit(QTextEdit):
@@ -33,6 +34,7 @@ class EditorWidget(QWidget):
     new_file_requested = pyqtSignal()
     open_file_requested = pyqtSignal()
     export_requested = pyqtSignal(str)
+    settings_requested = pyqtSignal()
 
     def __init__(self, imgs_dir=""):
         super().__init__()
@@ -73,6 +75,8 @@ class EditorWidget(QWidget):
         self.editor = FormatPainterTextEdit()
         self.editor.setAcceptRichText(True)
         self.editor.textChanged.connect(self.content_changed.emit)
+        self.editor.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.editor.customContextMenuRequested.connect(self._on_editor_context_menu)
         layout.addWidget(self.editor)
 
     def _setup_format_toolbar(self):
@@ -285,6 +289,183 @@ class EditorWidget(QWidget):
         btn = self.sender()
         if isinstance(btn, QPushButton):
             menu.exec_(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _on_editor_context_menu(self, pos):
+        cursor = self.editor.textCursor()
+        cursor.setPosition(self.editor.anchorAt(pos))
+        
+        char_format = cursor.charFormat()
+        is_image = char_format.isImageFormat()
+        
+        if is_image:
+            self._show_image_context_menu(cursor, pos)
+    
+    def _show_image_context_menu(self, cursor, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: white;
+                border: 1px solid #ccc;
+            }
+            QMenu::item {
+                padding: 8px 20px;
+            }
+            QMenu::item:selected {
+                background: #007bff;
+                color: white;
+            }
+        """)
+        
+        copy_action = QAction("复制图片", self)
+        copy_action.setShortcut("Ctrl+C")
+        copy_action.triggered.connect(lambda: self._on_copy_image(cursor))
+        menu.addAction(copy_action)
+        
+        save_as_action = QAction("另存为...", self)
+        save_as_action.triggered.connect(lambda: self._on_save_image_as(cursor))
+        menu.addAction(save_as_action)
+        
+        menu.addSeparator()
+        
+        ocr_action = QAction("识别文字 (OCR)", self)
+        ocr_action.triggered.connect(lambda: self._on_ocr_image(cursor))
+        menu.addAction(ocr_action)
+        
+        menu.exec_(self.editor.mapToGlobal(pos))
+    
+    def _on_copy_image(self, cursor):
+        try:
+            char_format = cursor.charFormat()
+            image = char_format.toImageFormat()
+            
+            if not image or not image.name():
+                QMessageBox.warning(self, "错误", "无法获取图片信息")
+                return
+            
+            image_path = self._find_image_file(image.name())
+            
+            if not image_path or not os.path.exists(image_path):
+                QMessageBox.warning(self, "错误", f"图片文件不存在: {image.name()}")
+                return
+            
+            pixmap = QPixmap(image_path)
+            if pixmap.isNull():
+                QMessageBox.warning(self, "错误", "无法加载图片")
+                return
+            
+            clipboard = QApplication.clipboard()
+            clipboard.setPixmap(pixmap)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"复制失败: {str(e)}")
+    
+    def _on_save_image_as(self, cursor):
+        try:
+            char_format = cursor.charFormat()
+            image = char_format.toImageFormat()
+            
+            if not image or not image.name():
+                QMessageBox.warning(self, "错误", "无法获取图片信息")
+                return
+            
+            image_path = self._find_image_file(image.name())
+            
+            if not image_path or not os.path.exists(image_path):
+                QMessageBox.warning(self, "错误", f"图片文件不存在: {image.name()}")
+                return
+            
+            original_name = os.path.basename(image_path)
+            
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "另存为",
+                original_name,
+                "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)"
+            )
+            
+            if not file_path:
+                return
+            
+            import shutil
+            shutil.copy2(image_path, file_path)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"保存失败: {str(e)}")
+    
+    def _on_ocr_image(self, cursor):
+        try:
+            from ocr_manager import OCRManager
+            
+            char_format = cursor.charFormat()
+            image = char_format.toImageFormat()
+            
+            if not image or not image.name():
+                QMessageBox.warning(self, "错误", "无法获取图片信息")
+                return
+            
+            image_path = self._find_image_file(image.name())
+            
+            if not image_path or not os.path.exists(image_path):
+                QMessageBox.warning(self, "错误", f"图片文件不存在: {image.name()}")
+                return
+            
+            ocr_manager = OCRManager()
+            
+            if not ocr_manager.is_configured():
+                reply = QMessageBox.question(
+                    self,
+                    "OCR 配置",
+                    "OCR 功能尚未配置，是否现在打开设置？",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    self.settings_requested.emit()
+                return
+            
+            progress = QMessageBox(self)
+            progress.setWindowTitle("OCR 识别中")
+            progress.setText("正在识别图片中的文字，请稍候...")
+            progress.setStandardButtons(QMessageBox.NoButton)
+            progress.show()
+            self.processEvents()
+            
+            success, result = ocr_manager.recognize_image(image_path)
+            
+            progress.close()
+            
+            if success:
+                html = f'''
+                <div class="ocr-result" style="margin: 10px 0; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                    <div style="font-size: 12px; color: #666; margin-bottom: 4px;">识别结果：</div>
+                    <div contenteditable="true" style="min-height: 20px; padding: 4px; background: white; border: 1px dashed #ccc;">
+                        {result}
+                    </div>
+                </div>
+                '''
+                cursor.movePosition(QTextCursor.EndOfBlock)
+                cursor.insertBlock()
+                cursor.insertHtml(html)
+                cursor.insertBlock()
+            else:
+                QMessageBox.warning(self, "识别失败", result)
+        
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"OCR 失败: {str(e)}")
+    
+    def _find_image_file(self, image_name):
+        if os.path.exists(image_name):
+            return image_name
+        
+        if self.imgs_dir:
+            rel_path = os.path.join(self.imgs_dir, image_name)
+            if os.path.exists(rel_path):
+                return rel_path
+        
+        current_dir_path = os.path.join(os.getcwd(), image_name)
+        if os.path.exists(current_dir_path):
+            return current_dir_path
+        
+        return None
 
     def set_html(self, html: str):
         self.editor.blockSignals(True)
