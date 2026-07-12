@@ -3,7 +3,12 @@ name: Build Windows EXE
 on:
   push:
     branches: [main]
+    tags:
+      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -32,3 +37,14 @@ jobs:
         with:
           name: GitNoteEditor-Windows
           path: dist/GitNoteEditor.exe
+
+      - name: Create Release and Upload EXE
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/GitNoteEditor.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
