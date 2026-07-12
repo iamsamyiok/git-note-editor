@@ -21,6 +21,7 @@ from dialogs import (
 from screenshot_widget import ScreenshotWidget
 from settings_dialog import SettingsDialog
 from bookmark_widget import BookmarkWidget
+from chat_widget import ChatWidget
 
 
 class MainWindow(QMainWindow):
@@ -55,8 +56,12 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 2)
 
         self.bookmark_widget = BookmarkWidget()
+        self.chat_widget = ChatWidget()
+        self.chat_widget.export_requested.connect(self._on_chat_export)
+        
         self.tab_widget.addTab(self.note_widget, "📝 笔记")
         self.tab_widget.addTab(self.bookmark_widget, "🔗 网址收藏")
+        self.tab_widget.addTab(self.chat_widget, "💬 AI聊天")
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -88,8 +93,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+M"), self, self._on_commit)
         QShortcut(QKeySequence("Ctrl+B"), self, self._on_new_branch)
         QShortcut(QKeySequence("Ctrl+P"), self, lambda: self._on_export("pdf"))
-        QShortcut(QKeySequence("Ctrl+Shift+A"), self, self._switch_to_bookmarks)
-    def _switch_to_bookmarks(self):
         self.tab_widget.setCurrentIndex(1)
 
     def _on_new_file(self):
