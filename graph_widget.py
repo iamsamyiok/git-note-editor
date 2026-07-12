@@ -83,7 +83,7 @@ class CommitNodeItem(QGraphicsItem):
             painter.drawEllipse(QPointF(cx, cy), r + 3, r + 3)
 
         if self._hovered:
-            painter.setPen(QPen(QColor("#000000"), 1))
+            painter.setPen(QPen(QColor(0, 0, 0, 80)))
             painter.setBrush(QBrush(QColor(255, 255, 255, 40)))
             painter.drawEllipse(QPointF(cx, cy), r + 2, r + 2)
 
@@ -134,7 +134,7 @@ class CommitNodeItem(QGraphicsItem):
 
 class GraphView(QGraphicsView):
     node_clicked = pyqtSignal(str)
-    node_right_clicked = pyqtSignal(str, QPointF)
+    delete_requested = pyqtSignal(str)
     graph_refresh_requested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -146,7 +146,6 @@ class GraphView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._nodes: Dict[str, CommitNodeItem] = {}
-        self._connection_paths = []
         self._branch_labels = []
         self._current_hash = ""
 
@@ -176,10 +175,11 @@ class GraphView(QGraphicsView):
         self._draw_connections(commits)
         self._draw_branch_labels(commits)
 
+        max_row = max((c.row for c in commits.values()), default=0)
         scene_rect = QRectF(
             0, 0,
             max_lane * LANE_WIDTH + 40,
-            max((c.row for c in commits.values()), default=0) * ROW_HEIGHT + ROW_HEIGHT + 40,
+            max_row * ROW_HEIGHT + ROW_HEIGHT + 40,
         )
         self._scene.setSceneRect(scene_rect)
 
@@ -207,8 +207,6 @@ class GraphView(QGraphicsView):
                 if c.lane == child.lane:
                     path.moveTo(p1.x(), p1.y() + r)
                     path.lineTo(p2.x(), p2.y() - child_item.radius())
-                    pen = QPen(color, 2)
-                    self._scene.addPath(path, pen)
                 else:
                     start_y = p1.y() + r
                     end_y = p2.y() - child_item.radius()
@@ -220,8 +218,9 @@ class GraphView(QGraphicsView):
                         p2.x(), mid_y,
                         p2.x(), end_y,
                     )
-                    pen = QPen(color, 2)
-                    self._scene.addPath(path, pen)
+
+                pen = QPen(color, 2)
+                self._scene.addPath(path, pen)
 
     def _draw_branch_labels(self, commits: Dict[str, CommitNode]):
         seen = set()
@@ -241,17 +240,6 @@ class GraphView(QGraphicsView):
                     text.setPos(pos.x() - 50, pos.y() - r - 22)
 
                     self._branch_labels.append(text)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.RightButton:
-            item = self.itemAt(event.pos())
-            if isinstance(item, CommitNodeItem):
-                self.node_right_clicked.emit(
-                    item.commit.hash,
-                    self.mapToScene(event.pos()),
-                )
-                return
-        super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -284,11 +272,11 @@ class GraphView(QGraphicsView):
 
             del_action = QAction("删除本次提交", self)
             del_action.triggered.connect(
-                lambda: self.node_right_clicked.emit(
-                    item.commit.hash, QPointF()
-                )
+                lambda: self.delete_requested.emit(item.commit.hash)
             )
             menu.addAction(del_action)
+
+            menu.addSeparator()
 
             refresh_action = QAction("刷新图谱", self)
             refresh_action.triggered.connect(

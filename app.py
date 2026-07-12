@@ -25,14 +25,15 @@ BRANCH_COLORS = [
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.git = GitManager()
         self.current_hash = ""
         self.ignore_editor_change = False
 
-        ok, msg = check_git()
+        ok, git_exe, msg = check_git()
         if not ok:
             self._handle_no_git()
             return
+
+        self.git = GitManager(git_exe=git_exe)
 
         self.setWindowTitle("Git 版本化富文本笔记工具")
         self.setMinimumSize(1200, 700)
@@ -55,7 +56,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("就绪 — 请新建或打开一个笔记文件")
 
         self.graph_view.node_clicked.connect(self._on_node_clicked)
-        self.graph_view.node_right_clicked.connect(self._on_node_context_menu)
+        self.graph_view.delete_requested.connect(self._on_delete_requested)
         self.graph_view.graph_refresh_requested.connect(self._refresh_graph)
         self.editor.content_changed.connect(self._on_editor_changed)
 
@@ -101,8 +102,6 @@ class MainWindow(QMainWindow):
                 show_error(self, "安装失败", "Git 安装失败，请手动安装。")
         self.close()
 
-    # ---------- file operations ----------
-
     def _on_new_file(self):
         if not self._check_dirty():
             return
@@ -125,7 +124,9 @@ class MainWindow(QMainWindow):
             self.branch_action.setEnabled(True)
             self._refresh_graph()
             self.status_bar.showMessage(f"已创建：{name}")
-            self.setWindowTitle(f"Git 版本化富文本笔记工具 — {os.path.basename(name)}")
+            self.setWindowTitle(
+                f"Git 版本化富文本笔记工具 — {os.path.basename(name)}"
+            )
 
     def _on_open_file(self):
         if not self._check_dirty():
@@ -154,9 +155,9 @@ class MainWindow(QMainWindow):
         self._refresh_graph()
 
         self.status_bar.showMessage(f"已打开：{path}")
-        self.setWindowTitle(f"Git 版本化富文本笔记工具 — {os.path.basename(path)}")
-
-    # ---------- commit & branch ----------
+        self.setWindowTitle(
+            f"Git 版本化富文本笔记工具 — {os.path.basename(path)}"
+        )
 
     def _on_commit(self):
         if not self.git.repo_ok():
@@ -189,9 +190,7 @@ class MainWindow(QMainWindow):
         if dlg.exec_() != BranchDialog.Accepted:
             return
 
-        ok, err = self.git.create_branch(
-            dlg.branch_name(), self.current_hash
-        )
+        ok, err = self.git.create_branch(dlg.branch_name(), self.current_hash)
         if not ok:
             show_error(self, "创建分支失败", err)
             return
@@ -206,8 +205,6 @@ class MainWindow(QMainWindow):
         self.editor.set_modified(False)
         self._refresh_graph()
         self.status_bar.showMessage(f"已切换到分支：{dlg.branch_name()}")
-
-    # ---------- node interaction ----------
 
     def _on_node_clicked(self, hash_value: str):
         if not self.git.repo_ok():
@@ -241,7 +238,7 @@ class MainWindow(QMainWindow):
         self.editor.set_modified(False)
         self.status_bar.showMessage(f"已切换到：{hash_value[:8]}")
 
-    def _on_node_context_menu(self, hash_value: str, _pos):
+    def _on_delete_requested(self, hash_value: str):
         if not self.git.repo_ok():
             return
 
@@ -270,13 +267,9 @@ class MainWindow(QMainWindow):
         self._refresh_graph()
         self.status_bar.showMessage("提交已删除，图谱已更新")
 
-    # ---------- editor ----------
-
     def _on_editor_changed(self):
         if self.ignore_editor_change:
             return
-
-    # ---------- graph ----------
 
     def _refresh_graph(self):
         if not self.git.repo_ok():
@@ -295,16 +288,12 @@ class MainWindow(QMainWindow):
                 color_idx += 1
             c.branch_color = branch_color_map.get(c.branch_name, "#9E9E9E")
 
-        root_hash = None
         for h, c in commits.items():
             if not c.parent_hashes:
                 c.is_root = True
-                root_hash = h
                 break
 
         self.graph_view.set_commits(commits, self.current_hash)
-
-    # ---------- helpers ----------
 
     def _check_dirty(self) -> bool:
         if not self.git.repo_ok():
@@ -328,8 +317,9 @@ class MainWindow(QMainWindow):
 
 
 def run():
-    app = QApplication(sys.argv)
+    import sys as _sys
+    app = QApplication(_sys.argv)
     app.setStyle("Fusion")
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    _sys.exit(app.exec_())

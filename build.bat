@@ -13,9 +13,9 @@ if errorlevel 1 (
 )
 
 echo [信息] 正在打包为单文件 EXE ...
-pyinstaller --onefile --windowed ^
+pyinstaller --onefile --windowed --noupx ^
     --name "GitNoteEditor" ^
-    --add-data "*.py;." ^
+    --hidden-import PyQt5 ^
     --hidden-import PyQt5.QtCore ^
     --hidden-import PyQt5.QtGui ^
     --hidden-import PyQt5.QtWidgets ^

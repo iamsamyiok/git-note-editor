@@ -1,6 +1,6 @@
 import os
+import sys
 import subprocess
-import glob
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -11,9 +11,12 @@ BRANCH_COLORS = [
     "#9C27B0", "#00BCD4", "#795548", "#607D8B",
 ]
 
+_creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
 
 class GitManager:
-    def __init__(self):
+    def __init__(self, git_exe="git"):
+        self.git_exe = git_exe
         self.repo_path = ""
         self.html_file = ""
         self.imgs_dir = ""
@@ -65,9 +68,10 @@ class GitManager:
         self._run("add", ".")
         code, out, err = self._run("commit", "-m", full_msg)
         if code != 0:
-            if "nothing to commit" in (out + err).lower():
+            combined = (out + err).lower()
+            if "nothing to commit" in combined:
                 return False, "没有需要提交的变更。"
-            return False, err or out
+            return False, (err or out)[:200]
         return True, self._latest_hash()
 
     # ---------- branch ----------
@@ -76,21 +80,21 @@ class GitManager:
         branches = self._branches()
         if name in branches:
             return False, f"分支 {name} 已存在。"
-        code, _, err = self._run("branch", name, from_commit)
+        code, out, err = self._run("branch", name, from_commit)
         if code != 0:
-            return False, err
+            return False, (err or out)[:200]
         return True, ""
 
     def switch_branch(self, name: str) -> Tuple[bool, str]:
-        code, _, err = self._run("checkout", name)
+        code, out, err = self._run("checkout", name)
         if code != 0:
-            return False, err
+            return False, (err or out)[:200]
         return True, ""
 
     def checkout_commit(self, commit_hash: str) -> Tuple[bool, str]:
-        code, _, err = self._run("checkout", commit_hash)
+        code, out, err = self._run("checkout", commit_hash)
         if code != 0:
-            return False, err
+            return False, (err or out)[:200]
         return True, ""
 
     def delete_commit(self, commit_hash: str) -> Tuple[bool, str]:
@@ -113,7 +117,7 @@ class GitManager:
             self._run("reset", "--soft", parent)
             code, out, err = self._run("commit", "-m", "remove intermediate")
             if code != 0:
-                self._run("reset", "--hard", f"ORIG_HEAD")
+                self._run("reset", "--hard", "ORIG_HEAD")
                 return False, (err or out)[:200]
 
             for child_hash in children[1:]:
@@ -128,7 +132,7 @@ class GitManager:
                 self._run("checkout", saved_branch)
             except Exception:
                 pass
-            return False, str(e)
+            return False, str(e)[:200]
 
     # ---------- query ----------
 
@@ -174,7 +178,7 @@ class GitManager:
         return self._run_out("rev-parse", "HEAD").strip()
 
     def is_dirty(self) -> bool:
-        code = self._run_code("diff", "--quiet")
+        code = self._run_code("diff", "--quiet", "--", ".")
         return code != 0
 
     def is_root(self, commit_hash: str) -> bool:
@@ -222,34 +226,48 @@ class GitManager:
             self._run("config", "user.email", "note@git.local")
 
     def _run(self, *args) -> Tuple[int, str, str]:
-        proc = subprocess.run(
-            ["git"] + list(args),
-            cwd=self.repo_path,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return proc.returncode, proc.stdout, proc.stderr
+        try:
+            proc = subprocess.run(
+                [self.git_exe] + list(args),
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=_creationflags,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        except FileNotFoundError:
+            return 128, "", f"找不到 git: {self.git_exe}"
+        except Exception as e:
+            return 128, "", str(e)
 
     def _run_out(self, *args) -> str:
-        proc = subprocess.run(
-            ["git"] + list(args),
-            cwd=self.repo_path,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return proc.stdout
+        try:
+            proc = subprocess.run(
+                [self.git_exe] + list(args),
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=_creationflags,
+            )
+            return proc.stdout
+        except Exception:
+            return ""
 
     def _run_code(self, *args) -> int:
-        proc = subprocess.run(
-            ["git"] + list(args),
-            cwd=self.repo_path,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return proc.returncode
+        try:
+            proc = subprocess.run(
+                [self.git_exe] + list(args),
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=_creationflags,
+            )
+            return proc.returncode
+        except Exception:
+            return 128
 
     def _latest_hash(self) -> str:
         return self._run_out("rev-parse", "HEAD").strip()
@@ -291,11 +309,18 @@ class GitManager:
         return refs
 
     def _fsck_repair_internal(self, folder: str) -> bool:
-        proc = subprocess.run(
-            ["git", "fsck", "--full"],
-            cwd=folder, capture_output=True, text=True, timeout=30,
-        )
-        return proc.returncode == 0
+        try:
+            proc = subprocess.run(
+                [self.git_exe, "fsck", "--full"],
+                cwd=folder,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=_creationflags,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
 
     def _assign_branches(self, nodes: Dict[str, CommitNode]):
         branches = self._branches()
