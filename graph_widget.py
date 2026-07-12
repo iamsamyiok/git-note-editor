@@ -10,7 +10,7 @@ from PyQt5.QtGui import (
     QRadialGradient,
 )
 from PyQt5.QtCore import (
-    Qt, QRectF, QPointF, pyqtSignal,
+    Qt, QRectF, QPointF, pyqtSignal, QTimer,
 )
 
 from models import CommitNode
@@ -134,12 +134,31 @@ class GraphView(QWidget):
     node_clicked = pyqtSignal(str)
     delete_requested = pyqtSignal(str)
     graph_refresh_requested = pyqtSignal()
+    new_commit_requested = pyqtSignal()
+    new_branch_requested = pyqtSignal()
+    new_branch_at_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(4, 4, 4, 2)
+
+        commit_btn = QPushButton("提交变更")
+        commit_btn.setFixedHeight(28)
+        commit_btn.clicked.connect(self.new_commit_requested.emit)
+        btn_layout.addWidget(commit_btn)
+
+        branch_btn = QPushButton("新建分支")
+        branch_btn.setFixedHeight(28)
+        branch_btn.clicked.connect(self.new_branch_requested.emit)
+        btn_layout.addWidget(branch_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
 
         self._view = QGraphicsView()
         self._scene = QGraphicsScene()
@@ -156,6 +175,19 @@ class GraphView(QWidget):
 
         zoom_layout = QHBoxLayout()
         zoom_layout.setContentsMargins(4, 2, 4, 2)
+
+        self._fit_btn = QPushButton("全览")
+        self._fit_btn.setFixedSize(40, 24)
+        self._fit_btn.setStyleSheet("font-size:10px;")
+        self._fit_btn.clicked.connect(self._toggle_fit_view)
+        zoom_layout.addWidget(self._fit_btn)
+
+        self._current_node_btn = QPushButton("当前")
+        self._current_node_btn.setFixedSize(40, 24)
+        self._current_node_btn.setStyleSheet("font-size:10px;")
+        self._current_node_btn.clicked.connect(self._go_to_current)
+        zoom_layout.addWidget(self._current_node_btn)
+
         zoom_layout.addStretch()
 
         self.zoom_label = QPushButton("100%")
@@ -182,6 +214,9 @@ class GraphView(QWidget):
         self._branch_labels = []
         self._current_hash = ""
         self._zoom_level = 1.0
+        self._fit_mode = False
+        self._saved_transform = None
+        self._saved_scene_rect = None
 
     def set_commits(self, commits: Dict[str, CommitNode], current_hash: str):
         self._scene.clear()
@@ -217,8 +252,11 @@ class GraphView(QWidget):
         )
         self._scene.setSceneRect(scene_rect)
 
-        if current_hash and current_hash in self._nodes:
-            self._view.centerOn(self._nodes[current_hash])
+        QTimer.singleShot(50, self._auto_center_current)
+
+    def _auto_center_current(self):
+        if self._current_hash and self._current_hash in self._nodes:
+            self._view.centerOn(self._nodes[self._current_hash])
 
     def _draw_connections(self, commits: Dict[str, CommitNode]):
         for h, c in commits.items():
@@ -261,14 +299,17 @@ class GraphView(QWidget):
     def _draw_branch_labels(self, commits: Dict[str, CommitNode]):
         seen = set()
         for h, c in commits.items():
-            if c.branch_name and c.branch_name not in seen and c.branch_name != "main":
+            if c.branch_name and c.branch_name not in seen:
                 seen.add(c.branch_name)
                 if h in self._nodes:
                     item = self._nodes[h]
                     pos = item.pos()
                     r = item.radius()
 
-                    color = QColor(c.branch_color or "#9E9E9E")
+                    if c.branch_name == "main":
+                        color = QColor("#4CAF50")
+                    else:
+                        color = QColor(c.branch_color or "#9E9E9E")
                     font = QFont("Microsoft YaHei", 9, QFont.Bold)
 
                     text = self._scene.addText(c.branch_name, font)
@@ -299,6 +340,14 @@ class GraphView(QWidget):
         if isinstance(item, CommitNodeItem):
             menu = QMenu(self)
 
+            branch_action = QAction("在此新建分支", self)
+            branch_action.triggered.connect(
+                lambda: self.new_branch_at_requested.emit(item.commit.hash)
+            )
+            menu.addAction(branch_action)
+
+            menu.addSeparator()
+
             del_action = QAction("删除本次提交", self)
             del_action.triggered.connect(
                 lambda: self.delete_requested.emit(item.commit.hash)
@@ -324,17 +373,52 @@ class GraphView(QWidget):
         if hash_value in self._nodes:
             self._view.centerOn(self._nodes[hash_value])
 
+    def _go_to_current(self):
+        if self._current_hash and self._current_hash in self._nodes:
+            self._view.centerOn(self._nodes[self._current_hash])
+
+    def _toggle_fit_view(self):
+        if not self._fit_mode:
+            self._saved_transform = self._view.transform()
+            self._saved_scene_rect = self._view.mapToScene(
+                self._view.viewport().rect()
+            ).boundingRect()
+            self._view.fitInView(
+                self._scene.sceneRect(), Qt.KeepAspectRatio
+            )
+            self._fit_mode = True
+            self._fit_btn.setText("复原")
+            self.zoom_label.setText("适应")
+        else:
+            if self._saved_transform is not None:
+                self._view.setTransform(self._saved_transform)
+            if self._saved_scene_rect is not None:
+                self._view.centerOn(
+                    self._saved_scene_rect.center()
+                )
+            self._fit_mode = False
+            self._fit_btn.setText("全览")
+            self.zoom_label.setText(f"{int(self._zoom_level * 100)}%")
+            self._saved_transform = None
+            self._saved_scene_rect = None
+
     def _zoom_in(self):
+        self._fit_mode = False
+        self._fit_btn.setText("全览")
         self._view.scale(1.2, 1.2)
         self._zoom_level *= 1.2
         self.zoom_label.setText(f"{int(self._zoom_level * 100)}%")
 
     def _zoom_out(self):
+        self._fit_mode = False
+        self._fit_btn.setText("全览")
         self._view.scale(0.83, 0.83)
         self._zoom_level *= 0.83
         self.zoom_label.setText(f"{int(self._zoom_level * 100)}%")
 
     def _zoom_reset(self):
+        self._fit_mode = False
+        self._fit_btn.setText("全览")
         self._view.resetTransform()
         self._zoom_level = 1.0
         self.zoom_label.setText("100%")

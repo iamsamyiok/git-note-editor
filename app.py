@@ -1,13 +1,14 @@
 import os
 import sys
+import datetime
 
 from PyQt5.QtWidgets import (
     QMainWindow, QSplitter, QAction, QFileDialog,
-    QStatusBar, QMessageBox, QApplication, QToolBar,
-    QWidget, QVBoxLayout, QPushButton, QHBoxLayout,
+    QStatusBar, QMessageBox, QApplication,
+    QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QShortcut,
 )
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon, QKeySequence
+from PyQt5.QtCore import Qt, QRectF
 
 from version_manager import VersionManager, BRANCH_COLORS
 from graph_widget import GraphView
@@ -31,8 +32,6 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        self._setup_toolbar()
-
         self.splitter = QSplitter(Qt.Horizontal)
         self.setCentralWidget(self.splitter)
 
@@ -50,39 +49,22 @@ class MainWindow(QMainWindow):
         self.graph_view.node_clicked.connect(self._on_node_clicked)
         self.graph_view.delete_requested.connect(self._on_delete_requested)
         self.graph_view.graph_refresh_requested.connect(self._refresh_graph)
+        self.graph_view.new_commit_requested.connect(self._on_commit)
+        self.graph_view.new_branch_requested.connect(self._on_new_branch)
+        self.graph_view.new_branch_at_requested.connect(self._on_new_branch_at)
+        self.editor.new_file_requested.connect(self._on_new_file)
+        self.editor.open_file_requested.connect(self._on_open_file)
+        self.editor.export_requested.connect(self._on_export)
         self.editor.content_changed.connect(self._on_editor_changed)
 
-    def _setup_toolbar(self):
-        toolbar = self.addToolBar("主工具栏")
-        toolbar.setMovable(False)
-        toolbar.setIconSize(toolbar.iconSize())
+        self._setup_shortcuts()
 
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
-        icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
-
-        new_action = QAction(icon, "新建笔记", self)
-        new_action.setShortcut("Ctrl+N")
-        new_action.triggered.connect(self._on_new_file)
-        toolbar.addAction(new_action)
-
-        open_action = QAction("打开笔记", self)
-        open_action.setShortcut("Ctrl+O")
-        open_action.triggered.connect(self._on_open_file)
-        toolbar.addAction(open_action)
-
-        toolbar.addSeparator()
-
-        self.commit_action = QAction("提交变更", self)
-        self.commit_action.setShortcut("Ctrl+Return")
-        self.commit_action.triggered.connect(self._on_commit)
-        self.commit_action.setEnabled(False)
-        toolbar.addAction(self.commit_action)
-
-        self.branch_action = QAction("新建分支", self)
-        self.branch_action.setShortcut("Ctrl+B")
-        self.branch_action.triggered.connect(self._on_new_branch)
-        self.branch_action.setEnabled(False)
-        toolbar.addAction(self.branch_action)
+    def _setup_shortcuts(self):
+        QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_file)
+        QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_file)
+        QShortcut(QKeySequence("Ctrl+M"), self, self._on_commit)
+        QShortcut(QKeySequence("Ctrl+B"), self, self._on_new_branch)
+        QShortcut(QKeySequence("Ctrl+P"), self, lambda: self._on_export("pdf"))
 
     def _on_new_file(self):
         if not self._check_dirty():
@@ -102,8 +84,6 @@ class MainWindow(QMainWindow):
             self.editor.imgs_dir = self.vm.imgs_dir
             self.editor.set_html("<html><body></body></html>")
             self.editor.set_modified(False)
-            self.commit_action.setEnabled(True)
-            self.branch_action.setEnabled(True)
             self._refresh_graph()
             self.status_bar.showMessage(f"已创建：{name}")
             self.setWindowTitle(f"版本化富文本笔记 — {os.path.basename(name)}")
@@ -128,9 +108,6 @@ class MainWindow(QMainWindow):
         html = self.vm.read_html()
         self.editor.set_html(html)
         self.editor.set_modified(False)
-
-        self.commit_action.setEnabled(True)
-        self.branch_action.setEnabled(True)
 
         self._refresh_graph()
 
@@ -179,6 +156,25 @@ class MainWindow(QMainWindow):
         self.editor.set_modified(False)
         self._refresh_graph()
         self.status_bar.showMessage(f"已创建并切换到分支：{dlg.branch_name()}")
+
+    def _on_new_branch_at(self, hash_value: str):
+        if not self.vm.repo_ok():
+            return
+
+        branches = self.vm.branches()
+        dlg = BranchDialog(branches, self)
+        if dlg.exec_() != BranchDialog.Accepted:
+            return
+
+        ok, err = self.vm.create_branch(dlg.branch_name(), hash_value)
+        if not ok:
+            show_error(self, "创建分支失败", err)
+            return
+
+        self._refresh_graph()
+        self.status_bar.showMessage(
+            f"已在 {hash_value[:8]} 处创建分支：{dlg.branch_name()}"
+        )
 
     def _on_node_clicked(self, hash_value: str):
         if not self.vm.repo_ok():
@@ -241,6 +237,87 @@ class MainWindow(QMainWindow):
 
     def _on_editor_changed(self):
         pass
+
+    def _on_export(self, fmt: str):
+        if not self.vm.repo_ok():
+            return
+
+        ext_map = {
+            "pdf": "PDF 文件 (*.pdf)",
+            "html": "HTML 文件 (*.html)",
+            "png": "PNG 文件 (*.png)",
+            "svg": "SVG 文件 (*.svg)",
+        }
+        fmt_ext = {
+            "pdf": ".pdf",
+            "html": ".html",
+            "png": ".png",
+            "svg": ".svg",
+        }
+
+        base = os.path.basename(self.vm.root_path)
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"导出为 {fmt.upper()}",
+            base + fmt_ext[fmt],
+            ext_map[fmt],
+        )
+        if not path:
+            return
+
+        try:
+            if fmt == "pdf":
+                self._export_pdf(path)
+            elif fmt == "html":
+                self._export_html(path)
+            elif fmt == "png":
+                self._export_png(path)
+            elif fmt == "svg":
+                self._export_svg(path)
+            self.status_bar.showMessage(f"已导出：{path}")
+        except Exception as e:
+            show_error(self, "导出失败", str(e))
+
+    def _export_pdf(self, path: str):
+        from PyQt5.QtPrintSupport import QPrinter
+        from PyQt5.QtGui import QTextDocument
+
+        doc = QTextDocument()
+        doc.setHtml(self.editor.to_html())
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(path)
+        printer.setPageSizeMm(QPrinter.A4)
+        doc.print_(printer)
+
+    def _export_html(self, path: str):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.editor.to_html())
+
+    def _export_png(self, path: str):
+        from PyQt5.QtGui import QImage, QPainter
+        qte = self.editor.editor
+        content_height = int(qte.document().size().height()) + 20
+        content_width = int(qte.viewport().width())
+        pixmap = qte.grab(qte.viewport().rect())
+        pixmap.save(path, "PNG")
+
+    def _export_svg(self, path: str):
+        from PyQt5.QtSvg import QSvgGenerator
+        from PyQt5.QtGui import QPainter as QPt
+
+        qte = self.editor.editor
+        content_height = int(qte.document().size().height()) + 20
+        content_width = int(qte.viewport().width())
+
+        generator = QSvgGenerator()
+        generator.setFileName(path)
+        generator.setSize(qte.viewport().size())
+        generator.setViewBox(QRectF(0, 0, content_width, content_height))
+
+        qte.document().setPageSize(qte.viewport().size())
+        painter = QPt(generator)
+        qte.document().drawContents(painter)
+        painter.end()
 
     def _refresh_graph(self):
         if not self.vm.repo_ok():

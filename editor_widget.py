@@ -2,9 +2,30 @@ import os
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QToolBar, QAction,
     QTextEdit, QFileDialog, QColorDialog, QInputDialog,
+    QComboBox, QPushButton, QLabel, QMessageBox, QMenu,
 )
-from PyQt5.QtGui import QFont, QColor, QTextCharFormat, QTextListFormat, QImage
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import (
+    QFont, QColor, QTextCharFormat, QTextListFormat, QImage,
+    QTextCursor, QPainter, QPixmap, QMouseEvent,
+)
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF
+from PyQt5.QtPrintSupport import QPrinter
+
+
+class FormatPainterTextEdit(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.format_painter_active = False
+        self.format_painter_format = None
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self.format_painter_active and self.format_painter_format:
+            cursor = self.textCursor()
+            cursor.mergeCharFormat(self.format_painter_format)
+            self.format_painter_active = False
+            self.format_painter_format = None
+            self.viewport().setCursor(Qt.IBeamCursor)
+        super().mouseReleaseEvent(event)
 
 
 class EditorWidget(QWidget):
@@ -16,17 +37,71 @@ class EditorWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(4, 4, 4, 2)
+
+        new_btn = QPushButton("新建笔记")
+        new_btn.setFixedHeight(28)
+        new_btn.clicked.connect(self._emit_new_file)
+        top_bar.addWidget(new_btn)
+
+        open_btn = QPushButton("打开笔记")
+        open_btn.setFixedHeight(28)
+        open_btn.clicked.connect(self._emit_open_file)
+        top_bar.addWidget(open_btn)
+
+        export_btn = QPushButton("导出")
+        export_btn.setFixedHeight(28)
+        export_btn.clicked.connect(self._on_export)
+        top_bar.addWidget(export_btn)
+
+        top_bar.addStretch()
 
         self.toolbar = QToolBar()
-        self._setup_toolbar()
-        layout.addWidget(self.toolbar)
+        self.toolbar.setMovable(False)
+        self.toolbar.setIconSize(self.toolbar.iconSize())
+        self._setup_format_toolbar()
+        top_bar.addWidget(self.toolbar)
 
-        self.editor = QTextEdit()
+        layout.addLayout(top_bar)
+
+        self.editor = FormatPainterTextEdit()
         self.editor.setAcceptRichText(True)
         self.editor.textChanged.connect(self.content_changed.emit)
         layout.addWidget(self.editor)
 
-    def _setup_toolbar(self):
+        self.new_file_requested = pyqtSignal()
+        self.open_file_requested = pyqtSignal()
+        self.export_requested = pyqtSignal(str)
+
+    def _setup_format_toolbar(self):
+        self.font_combo = QComboBox()
+        self.font_combo.setEditable(True)
+        self.font_combo.setFixedWidth(60)
+        for sz in ["9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36", "48"]:
+            self.font_combo.addItem(sz)
+        self.font_combo.setCurrentText("14")
+        self.font_combo.currentTextChanged.connect(self._on_font_size)
+        self.toolbar.addWidget(QLabel("字号"))
+        self.toolbar.addWidget(self.font_combo)
+        self.toolbar.addSeparator()
+
+        headings = [
+            ("正文", 0),
+            ("一级标题", 1),
+            ("二级标题", 2),
+            ("三级标题", 3),
+            ("四级标题", 4),
+        ]
+        for label, level in headings:
+            btn = QPushButton(label)
+            btn.setFixedHeight(26)
+            btn.clicked.connect(lambda _, l=level: self._set_heading(l))
+            self.toolbar.addWidget(btn)
+        self.toolbar.addSeparator()
+
         actions = [
             ("bold", "B", True, "加粗"),
             ("italic", "I", True, "斜体"),
@@ -46,41 +121,73 @@ class EditorWidget(QWidget):
             ("table", "表格", False, "插入表格"),
             ("link", "链接", False, "超链接"),
             ("image", "图片", False, "插入图片"),
+            (None, None, False, ""),
+            ("format_painter", "格式刷", False, "格式刷"),
         ]
 
         for action_id, label, checkable, tip in actions:
             if action_id is None:
                 self.toolbar.addSeparator()
                 continue
-
-            if checkable:
-                act = QAction(label, self)
-                act.setCheckable(True)
-                act.setToolTip(tip)
-                act.toggled.connect(lambda c, a=action_id: self._on_format(a, c))
-            else:
-                act = QAction(label, self)
-                act.setToolTip(tip)
-                act.triggered.connect(lambda _, a=action_id: self._on_action(a))
-
+            act = QAction(label, self)
+            act.setToolTip(tip)
+            act.triggered.connect(lambda _, a=action_id: self._on_format_action(a))
             self.toolbar.addAction(act)
 
-    def _on_format(self, fmt: str, checked: bool):
-        cf = QTextCharFormat()
-        if fmt == "bold":
-            cf.setFontWeight(QFont.Bold if checked else QFont.Normal)
-            self.editor.mergeCurrentCharFormat(cf)
-        elif fmt == "italic":
-            cf.setFontItalic(checked)
-            self.editor.mergeCurrentCharFormat(cf)
-        elif fmt == "underline":
-            cf.setFontUnderline(checked)
-            self.editor.mergeCurrentCharFormat(cf)
+    def _emit_new_file(self):
+        self.new_file_requested.emit()
 
-    def _on_action(self, action: str):
+    def _emit_open_file(self):
+        self.open_file_requested.emit()
+
+    def _on_font_size(self, text):
+        try:
+            size = int(text)
+        except ValueError:
+            return
+        cf = QTextCharFormat()
+        cf.setFontPointSize(size)
+        self.editor.mergeCurrentCharFormat(cf)
+        self.editor.setFocus()
+
+    def _set_heading(self, level: int):
+        cursor = self.editor.textCursor()
+        cf = QTextCharFormat()
+        if level == 0:
+            cf.setFontPointSize(14)
+            cf.setFontWeight(QFont.Normal)
+        elif level == 1:
+            cf.setFontPointSize(28)
+            cf.setFontWeight(QFont.Bold)
+        elif level == 2:
+            cf.setFontPointSize(22)
+            cf.setFontWeight(QFont.Bold)
+        elif level == 3:
+            cf.setFontPointSize(18)
+            cf.setFontWeight(QFont.Bold)
+        elif level == 4:
+            cf.setFontPointSize(15)
+            cf.setFontWeight(QFont.Bold)
+        cursor.mergeCharFormat(cf)
+        self.editor.setFocus()
+
+    def _on_format_action(self, action: str):
         cursor = self.editor.textCursor()
 
-        if action == "color":
+        if action == "bold":
+            cf = QTextCharFormat()
+            is_bold = self.editor.fontWeight() != QFont.Bold
+            cf.setFontWeight(QFont.Bold if is_bold else QFont.Normal)
+            cursor.mergeCharFormat(cf)
+        elif action == "italic":
+            cf = QTextCharFormat()
+            cf.setFontItalic(not self.editor.fontItalic())
+            cursor.mergeCharFormat(cf)
+        elif action == "underline":
+            cf = QTextCharFormat()
+            cf.setFontUnderline(not self.editor.fontUnderline())
+            cursor.mergeCharFormat(cf)
+        elif action == "color":
             color = QColorDialog.getColor(parent=self)
             if color.isValid():
                 cf = QTextCharFormat()
@@ -113,11 +220,19 @@ class EditorWidget(QWidget):
         elif action == "link":
             url = QInputDialog.getText(self, "插入超链接", "URL:")
             if url[1] and url[0]:
-                cursor.insertHtml(
-                    f'<a href="{url[0]}">{url[0]}</a>'
-                )
+                cursor.insertHtml(f'<a href="{url[0]}">{url[0]}</a>')
         elif action == "image":
             self._insert_image()
+        elif action == "format_painter":
+            self._format_painter()
+        self.editor.setFocus()
+
+    def _format_painter(self):
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            self.editor.format_painter_format = cursor.charFormat()
+            self.editor.format_painter_active = True
+            self.editor.viewport().setCursor(Qt.CrossCursor)
 
     def _insert_table(self):
         rows, ok1 = QInputDialog.getInt(self, "插入表格", "行数：", 3, 1, 20, 1)
@@ -126,7 +241,6 @@ class EditorWidget(QWidget):
         cols, ok2 = QInputDialog.getInt(self, "插入表格", "列数：", 3, 1, 10, 1)
         if not ok2:
             return
-
         html = '<table border="1" cellspacing="0" cellpadding="4">'
         for _ in range(rows):
             html += "<tr>"
@@ -134,7 +248,6 @@ class EditorWidget(QWidget):
                 html += "<td>&nbsp;</td>"
             html += "</tr>"
         html += "</table>"
-
         self.editor.textCursor().insertHtml(html)
 
     def _insert_image(self):
@@ -149,7 +262,6 @@ class EditorWidget(QWidget):
 
         import shutil
         os.makedirs(self.imgs_dir, exist_ok=True)
-
         name = os.path.basename(path)
         base, ext = os.path.splitext(name)
         dst = os.path.join(self.imgs_dir, name)
@@ -157,17 +269,23 @@ class EditorWidget(QWidget):
         while os.path.exists(dst):
             dst = os.path.join(self.imgs_dir, f"{base}_{counter}{ext}")
             counter += 1
-
         shutil.copy2(path, dst)
-
-        rel = os.path.join("imgs", os.path.basename(dst))
-        rel = rel.replace("\\", "/")
-
+        rel = os.path.join("imgs", os.path.basename(dst)).replace("\\", "/")
         editor_width = self.editor.viewport().width()
         img_width = max(editor_width - 40, 200)
-
-        html = f'<div><img src="{rel}" width="{img_width}"></div>'
+        html = f'<div style="display:block;"><img src="{rel}" width="{img_width}"></div><br>'
         self.editor.textCursor().insertHtml(html)
+
+    def _on_export(self):
+        from PyQt5.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.addAction("导出 PDF", lambda: self.export_requested.emit("pdf"))
+        menu.addAction("导出 HTML", lambda: self.export_requested.emit("html"))
+        menu.addAction("导出 PNG", lambda: self.export_requested.emit("png"))
+        menu.addAction("导出 SVG", lambda: self.export_requested.emit("svg"))
+        btn = self.sender()
+        if isinstance(btn, QPushButton):
+            menu.exec_(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def set_html(self, html: str):
         self.editor.blockSignals(True)
