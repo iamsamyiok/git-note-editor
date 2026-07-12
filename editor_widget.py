@@ -30,6 +30,9 @@ class FormatPainterTextEdit(QTextEdit):
 
 class EditorWidget(QWidget):
     content_changed = pyqtSignal()
+    new_file_requested = pyqtSignal()
+    open_file_requested = pyqtSignal()
+    export_requested = pyqtSignal(str)
 
     def __init__(self, imgs_dir=""):
         super().__init__()
@@ -71,10 +74,6 @@ class EditorWidget(QWidget):
         self.editor.setAcceptRichText(True)
         self.editor.textChanged.connect(self.content_changed.emit)
         layout.addWidget(self.editor)
-
-        self.new_file_requested = pyqtSignal()
-        self.open_file_requested = pyqtSignal()
-        self.export_requested = pyqtSignal(str)
 
     def _setup_format_toolbar(self):
         self.font_combo = QComboBox()
